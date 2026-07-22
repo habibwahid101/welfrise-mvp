@@ -75,7 +75,6 @@ export default function PaymentCenter() {
   )
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
       const data = await jsonRequest('/api/payments/dashboard', { cache: 'no-store' })
       setDashboard(data)
@@ -87,7 +86,10 @@ export default function PaymentCenter() {
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   function resetNotice() {
     setMessage('')

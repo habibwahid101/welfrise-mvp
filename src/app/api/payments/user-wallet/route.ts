@@ -13,7 +13,6 @@ export async function POST(request: Request) {
   const amount = Number(body?.amount)
   const slots = Number(body?.slots)
   const level = Number(body?.level)
-  const cycle = Math.max(1, Number(body?.cycle) || 1)
 
   if (!payerIdentifier) return NextResponse.json({ error: 'Wallet owner identifier is required' }, { status: 400 })
   if (!PACKAGE_SLOTS[amount] || PACKAGE_SLOTS[amount] !== slots) {
@@ -28,7 +27,6 @@ export async function POST(request: Request) {
     p_amount: amount,
     p_slots: slots,
     p_level: level,
-    p_cycle: cycle,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true, request: Array.isArray(data) ? data[0] : data })

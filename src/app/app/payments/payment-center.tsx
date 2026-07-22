@@ -30,6 +30,8 @@ const packages = [
   { amount: 100, slots: 10 },
 ]
 
+const BEP20_WALLET_PATTERN = /^0x[a-fA-F0-9]{40}$/
+
 function asNumber(value: unknown) {
   const number = Number(value)
   return Number.isFinite(number) ? number : 0
@@ -43,6 +45,18 @@ function formatDate(value: unknown) {
   if (!value) return '—'
   const date = new Date(String(value))
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+}
+
+function formatKycStatus(value: unknown) {
+  const status = String(value || 'not_submitted').toLowerCase()
+  const labels: Record<string, string> = {
+    not_submitted: 'Not submitted',
+    pending: 'Pending',
+    approved: 'Approved',
+    rejected: 'Rejected',
+    held: 'Under review',
+  }
+  return labels[status] || status.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())
 }
 
 async function jsonRequest(url: string, init?: RequestInit) {
@@ -61,7 +75,6 @@ export default function PaymentCenter() {
   const [method, setMethod] = useState<'binance' | 'user-wallet'>('binance')
   const [level, setLevel] = useState(1)
   const [packageAmount, setPackageAmount] = useState(10)
-  const [cycle, setCycle] = useState(1)
   const [payerIdentifier, setPayerIdentifier] = useState('')
   const [assigned, setAssigned] = useState<AssignedPayment | null>(null)
   const [txHash, setTxHash] = useState('')
@@ -103,14 +116,14 @@ export default function PaymentCenter() {
       if (method === 'binance') {
         const result = await jsonRequest('/api/payments/binance/request', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ amount: selectedPackage.amount, slots: selectedPackage.slots, level, cycle }),
+          body: JSON.stringify({ amount: selectedPackage.amount, slots: selectedPackage.slots, level }),
         })
         setAssigned(result.payment)
         setMessage('A receiving address has been assigned to this request. Send the exact amount before expiry.')
       } else {
         const result = await jsonRequest('/api/payments/user-wallet', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ payerIdentifier, amount: selectedPackage.amount, slots: selectedPackage.slots, level, cycle }),
+          body: JSON.stringify({ payerIdentifier, amount: selectedPackage.amount, slots: selectedPackage.slots, level }),
         })
         setMessage(`Authorization request sent to ${result.request?.payer_display || 'the wallet owner'}.`)
         setPayerIdentifier('')
@@ -165,6 +178,7 @@ export default function PaymentCenter() {
 
   async function requestWithdrawal(event: React.FormEvent) {
     event.preventDefault()
+    if (withdrawalDisabledReason) return
     resetNotice()
     setBusy('withdrawal')
     try {
@@ -187,8 +201,22 @@ export default function PaymentCenter() {
   const available = asNumber(dashboard?.wallet?.available_balance)
   const held = asNumber(dashboard?.wallet?.held_balance)
   const unlocked = Number(dashboard?.profile?.highest_unlocked_level || 1)
+  const kycStatus = String(dashboard?.profile?.kyc_status || 'not_submitted').toLowerCase()
   const fee = Math.round(withdrawalAmount * 5) / 100
   const net = Math.round((withdrawalAmount - fee) * 100) / 100
+  const withdrawalAmountValid = Number.isFinite(withdrawalAmount) && withdrawalAmount >= 10 && withdrawalAmount <= 100
+  const withdrawalAddressValid = BEP20_WALLET_PATTERN.test(withdrawalAddress.trim())
+  const withdrawalDisabledReason = busy === 'withdrawal'
+    ? 'Your withdrawal request is being submitted.'
+    : kycStatus !== 'approved'
+      ? 'Complete and receive approval for KYC before withdrawing.'
+      : !withdrawalAmountValid
+        ? 'Enter a gross amount between $10 and $100.'
+        : available < withdrawalAmount
+          ? 'Your available balance is insufficient.'
+          : !withdrawalAddressValid
+            ? 'Enter a valid BEP20 wallet address.'
+            : ''
 
   return (
     <div className="portal-stack">
@@ -199,7 +227,7 @@ export default function PaymentCenter() {
         <div><span>Available wallet</span><strong>{money(available)}</strong></div>
         <div><span>Held balance</span><strong>{money(held)}</strong></div>
         <div><span>Unlocked level</span><strong>Level {unlocked}</strong></div>
-        <div><span>KYC status</span><strong>{dashboard?.profile?.kyc_status || 'not submitted'}</strong></div>
+        <div><span>KYC status</span><strong>{formatKycStatus(kycStatus)}</strong></div>
       </section>
 
       <section className="portal-panel">
@@ -216,13 +244,12 @@ export default function PaymentCenter() {
         <div className="form-grid">
           <label>Level<select value={level} onChange={(e) => setLevel(Number(e.target.value))}>{Array.from({ length: unlocked }, (_, index) => <option key={index + 1} value={index + 1}>Level {index + 1}</option>)}</select></label>
           <label>Package<select value={packageAmount} onChange={(e) => setPackageAmount(Number(e.target.value))}>{packages.map((item) => <option key={item.amount} value={item.amount}>{money(item.amount)} · {item.slots} slot{item.slots > 1 ? 's' : ''}</option>)}</select></label>
-          <label>Championship cycle<input type="number" min={1} value={cycle} onChange={(e) => setCycle(Math.max(1, Number(e.target.value) || 1))} /></label>
           {method === 'user-wallet' ? <label>Wallet owner ID, referral code, or email<input value={payerIdentifier} onChange={(e) => setPayerIdentifier(e.target.value)} placeholder="Enter wallet owner identifier" /></label> : null}
         </div>
 
         <div className="rule-box">
           {method === 'binance'
-            ? 'The system assigns one valid receiving address. Internal wallet limits and rotation are not shown to users.'
+            ? 'A secure payment address will be assigned for this payment request.'
             : 'The wallet owner receives Approve or Decline. No deduction, slot, or commission occurs before approval.'}
         </div>
         <button className="primary-button portal-action" type="button" disabled={busy === 'create' || (method === 'user-wallet' && !payerIdentifier.trim())} onClick={() => void createPayment()}>{busy === 'create' ? 'Creating…' : method === 'binance' ? 'Generate payment address' : 'Send authorization request'}</button>
@@ -264,7 +291,10 @@ export default function PaymentCenter() {
           <label>Gross amount<input type="number" min={10} max={100} step="0.01" value={withdrawalAmount} onChange={(e) => setWithdrawalAmount(Number(e.target.value))} /></label>
           <label>BEP20 wallet address<input value={withdrawalAddress} onChange={(e) => setWithdrawalAddress(e.target.value)} placeholder="0x…" required /></label>
           <div className="withdrawal-preview"><span>Gross {money(withdrawalAmount)}</span><span>Fee {money(fee)}</span><strong>Net {money(net)}</strong></div>
-          <button className="primary-button" disabled={busy === 'withdrawal'}>{busy === 'withdrawal' ? 'Submitting…' : 'Request withdrawal'}</button>
+          <div className="withdrawal-submit">
+            <button className="primary-button" disabled={Boolean(withdrawalDisabledReason)}>{busy === 'withdrawal' ? 'Submitting…' : 'Request withdrawal'}</button>
+            {withdrawalDisabledReason ? <p className="small-muted" role="status">{withdrawalDisabledReason}</p> : null}
+          </div>
         </form>
       </section>
 

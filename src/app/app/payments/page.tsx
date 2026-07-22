@@ -25,7 +25,7 @@ export default async function PaymentsPage() {
           <p>{profile?.full_name || user.email} · closed-pilot account</p>
         </div>
         <nav className="portal-nav">
-          <Link href="/app">Prototype</Link>
+          <Link href="/app">Dashboard</Link>
           {profile?.role === 'admin' ? <Link href="/admin">Admin</Link> : null}
         </nav>
       </header>

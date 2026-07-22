@@ -158,6 +158,9 @@ th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacin
 .danger-button { background: #fff0ee !important; color: var(--danger) !important; border: 1px solid #ffd2cc !important; }
 .withdrawal-preview { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 11px; background: #f7faf7; border: 1px solid var(--line); font-size: 13px; }
 .withdrawal-preview strong { color: var(--green-700); }
+.withdrawal-submit { display: grid; align-content: start; gap: 7px; }
+.withdrawal-submit .primary-button { width: 100%; }
+.withdrawal-submit p { margin: 0; }
 .compact-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #edf1ee; padding: 9px 0; font-size: 13px; }
 .compact-list > div:last-child { border-bottom: 0; }
 .compact-list small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }

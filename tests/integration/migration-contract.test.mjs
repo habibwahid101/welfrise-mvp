@@ -5,6 +5,7 @@ import fs from 'node:fs'
 const sql = fs.readFileSync('supabase/migrations/20260723_003_security_integrity_and_admin_repair.sql','utf8')
 const engine = fs.readFileSync('supabase/migrations/20260723_002_payment_wallet_engine.sql','utf8')
 const driftRepair = fs.readFileSync('supabase/migrations/20260723_004_profile_championship_schema_drift_repair.sql','utf8')
+const treasuryPrivilegeRepair = fs.readFileSync('supabase/migrations/20260723_005_treasury_view_function_privilege_repair.sql','utf8')
 
 test('fresh user creation uses pgcrypto in extensions schema', () => { assert.match(sql,/extensions\.gen_random_bytes/); assert.match(sql,/set search_path = public, extensions, pg_temp/) })
 test('invalid receiving wallet is rejected without relying on UI', () => assert.match(sql,/\^0x\[0-9a-fA-F\]\{40\}\$/))
@@ -16,3 +17,4 @@ test('admin mutation requires aal2 at the database boundary', () => assert.match
 test('KYC paths are bound to authenticated user and submission', () => assert.match(sql,/v_user::text\|\|\/kyc\/|v_user::text\|\|'\/kyc\/'/))
 test('ledger and audit history cannot be rewritten', () => { for (const table of ['wallet_ledger','financial_ledger','payout_events','admin_audit_log']) assert.match(sql,new RegExp(table)) ; assert.match(sql,/Historical records are append-only/) })
 test('profile championship schema drift repair is idempotent', () => { for (const column of ['championship_cycle','championship_status','championship_completed_at']) assert.match(driftRepair,new RegExp(column)); assert.match(driftRepair,/add column if not exists/) })
+test('Treasury view payout helper execution is restored for authenticated users', () => { assert.match(treasuryPrivilegeRepair,/welfrise_payout_for_level\(integer\)/); assert.match(treasuryPrivilegeRepair,/grant execute/); assert.match(treasuryPrivilegeRepair,/authenticated/) })

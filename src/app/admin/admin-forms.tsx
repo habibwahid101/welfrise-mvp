@@ -3,11 +3,12 @@
 import { useActionState, useEffect, useRef, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import {
-  adjustWalletBalance, createReceivingWallet, initialActionResult, reviewBinancePayment,
+  adjustWalletBalance, createReceivingWallet, reviewBinancePayment,
   reviewWithdrawal, updateKycStatus, updateReceivingWalletStatus,
 } from './actions'
+import { initialActionResult, type ActionResult } from './action-state'
 
-function useIdempotencyKey(state: typeof initialActionResult) {
+function useIdempotencyKey(state: ActionResult) {
   const keyRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (state.message && keyRef.current) keyRef.current.value = ''
@@ -22,7 +23,7 @@ function Key({ inputRef }: { inputRef: React.RefObject<HTMLInputElement | null> 
   return <input ref={inputRef} type="hidden" name="idempotencyKey" defaultValue="" />
 }
 
-function Notice({ state }: { state: typeof initialActionResult }) {
+function Notice({ state }: { state: ActionResult }) {
   return state.message ? <div className={`action-notice ${state.success ? 'success' : 'error'}`} role={state.success ? 'status' : 'alert'} aria-live="polite">{state.message}</div> : null
 }
 

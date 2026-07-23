@@ -3,9 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { errorMessage } from '@/lib/safe-errors'
-
-export type ActionResult = { success: boolean; message: string; fieldErrors?: Record<string, string> }
-export const initialActionResult: ActionResult = { success: false, message: '' }
+import type { ActionResult } from './action-state'
 
 function value(formData: FormData, key: string) { return String(formData.get(key) || '').trim() }
 function checked(formData: FormData, key: string) { return formData.get(key) === 'on' }

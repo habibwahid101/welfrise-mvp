@@ -30,6 +30,7 @@ Run these migrations in the Supabase SQL Editor **in order**:
 1. `supabase/migrations/20260722_001_closed_pilot.sql`
 2. `supabase/migrations/20260723_002_payment_wallet_engine.sql`
 3. `supabase/migrations/20260723_003_security_integrity_and_admin_repair.sql`
+4. `supabase/migrations/20260723_004_profile_championship_schema_drift_repair.sql`
 
 Register the owner account, then promote it:
 
@@ -114,7 +115,7 @@ https://YOUR_VERCEL_DOMAIN/auth/callback
 
 ## Operational readiness boundary
 
-- Apply migrations **001, 002, then 003**. Migration 003 repairs the pgcrypto referral generator, adds invite controls, idempotency, expiry, AAL2 admin authorization, private KYC metadata writes, immutable history protections, blockchain review fields, and the read-only treasury exposure summary.
+- Apply migrations **001, 002, 003, then 004**. Migration 003 repairs the pgcrypto referral generator, adds invite controls, idempotency, expiry, AAL2 admin authorization, private KYC metadata writes, immutable history protections, blockchain review fields, and the read-only treasury exposure summary. Migration 004 idempotently restores the profile championship fields required by the member dashboard and participation-cycle engine.
 - Vercel requires only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; never place a service-role key in browser or Vercel public variables.
 - Set the Supabase Auth Site URL to the production Vercel origin and allow `https://YOUR_VERCEL_DOMAIN/auth/callback` as a redirect URL.
 - Admin financial and KYC mutations require a verified TOTP factor and an `aal2` session. Configure the verified BEP20 chain ID, USDT contract, and minimum confirmations in `payment_network_config` before any Binance approval; no token contract is hardcoded.

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { mapSafeError } from '@/lib/safe-errors'
+import { enforceRateLimit, requestActorKey } from '@/lib/rate-limit'
 
 const PACKAGE_SLOTS: Record<number, number> = { 10: 1, 20: 2, 50: 5, 100: 10 }
 
@@ -22,14 +24,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid level' }, { status: 400 })
   }
 
-  const { data, error } = await supabase.rpc('create_user_wallet_payment_request', {
-    p_payer_identifier: payerIdentifier,
-    p_amount: amount,
-    p_slots: slots,
-    p_level: level,
-  })
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json({ ok: true, request: Array.isArray(data) ? data[0] : data })
+  try {
+    await enforceRateLimit(supabase, 'payment_create', await requestActorKey(request, user.id))
+    const { data, error } = await supabase.rpc('create_user_wallet_payment_request_v2', {
+      p_payer_identifier: payerIdentifier, p_amount: amount, p_slots: slots, p_level: level,
+      p_idempotency_key: request.headers.get('idempotency-key') || crypto.randomUUID(),
+    })
+    if (error) throw error
+    return NextResponse.json({ ok: true, request: Array.isArray(data) ? data[0] : data })
+  } catch (error) {
+    const safe = mapSafeError(error, 'payments.user-wallet.create')
+    return NextResponse.json({ error: safe.message }, { status: safe.status })
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -45,18 +51,24 @@ export async function PATCH(request: Request) {
   }
 
   if (action === 'cancel') {
-    const { data, error } = await supabase.rpc('cancel_user_wallet_payment_request', { p_request_id: requestId })
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    return NextResponse.json({ ok: true, status: data })
+    try {
+      await enforceRateLimit(supabase, 'authorization', await requestActorKey(request, user.id))
+      const { data, error } = await supabase.rpc('cancel_user_wallet_payment_request', { p_request_id: requestId })
+      if (error) throw error
+      return NextResponse.json({ ok: true, status: data })
+    } catch (error) { const safe = mapSafeError(error, 'payments.user-wallet.cancel'); return NextResponse.json({ error: safe.message }, { status: safe.status }) }
   }
   if (!['approve', 'decline'].includes(action)) {
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
   }
 
-  const { data, error } = await supabase.rpc('respond_user_wallet_payment_request', {
-    p_request_id: requestId,
-    p_decision: action,
-  })
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json({ ok: true, status: data })
+  try {
+    await enforceRateLimit(supabase, 'authorization', await requestActorKey(request, user.id))
+    const { data, error } = await supabase.rpc('respond_user_wallet_payment_request_v2', {
+      p_request_id: requestId, p_decision: action,
+      p_idempotency_key: request.headers.get('idempotency-key') || crypto.randomUUID(),
+    })
+    if (error) throw error
+    return NextResponse.json({ ok: true, status: data })
+  } catch (error) { const safe = mapSafeError(error, 'payments.user-wallet.respond'); return NextResponse.json({ error: safe.message }, { status: safe.status }) }
 }

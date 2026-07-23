@@ -1,60 +1,68 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { validatePrivateDocument } from '@/lib/file-validation'
+import { mapSafeError } from '@/lib/safe-errors'
+import { enforceRateLimit, requestActorKey } from '@/lib/rate-limit'
 
-function safeName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120)
-}
-
-async function upload(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  submissionId: string,
-  label: string,
-  value: FormDataEntryValue | null,
-) {
-  if (!(value instanceof File) || value.size < 1 || value.size > 5_000_000) {
-    throw new Error(`${label} file is required and must be no larger than 5 MB`)
-  }
-  const path = `${userId}/kyc/${submissionId}-${label}-${safeName(value.name || 'document.bin')}`
-  const { error } = await supabase.storage.from('welfrise-private').upload(path, value, {
-    upsert: false,
-    contentType: value.type || undefined,
-  })
-  if (error) throw error
-  return path
-}
+const BUCKET = 'welfrise-private'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!user) return NextResponse.json({ error: 'You must sign in to continue.' }, { status: 401 })
 
-  const form = await request.formData()
-  const submissionId = crypto.randomUUID()
   const uploaded: string[] = []
-
   try {
-    const idPath = await upload(supabase, user.id, submissionId, 'id', form.get('idDocument')); uploaded.push(idPath)
-    const selfiePath = await upload(supabase, user.id, submissionId, 'selfie', form.get('selfie')); uploaded.push(selfiePath)
-    const addressPath = await upload(supabase, user.id, submissionId, 'address', form.get('addressDocument')); uploaded.push(addressPath)
+    await enforceRateLimit(supabase, 'kyc_upload', await requestActorKey(request, user.id))
+    const { data: existing, error: existingError } = await supabase
+      .from('kyc_submissions')
+      .select('id,status,id_document_path,selfie_path,address_document_path')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (existingError) throw existingError
+    if (existing && existing.status !== 'rejected') {
+      return NextResponse.json({ error: 'A KYC submission is already under review or approved.' }, { status: 409 })
+    }
 
-    const { data, error } = await supabase.from('kyc_submissions').upsert({
-      id: submissionId,
-      user_id: user.id,
-      id_document_path: idPath,
-      selfie_path: selfiePath,
-      address_document_path: addressPath,
-      status: 'pending',
-      submitted_at: new Date().toISOString(),
-      reviewed_at: null,
-      reviewed_by: null,
-      review_note: null,
-    }, { onConflict: 'user_id' }).select('id, status, submitted_at').single()
+    const form = await request.formData()
+    const idDocument = await validatePrivateDocument(form.get('idDocument'), 'ID document')
+    const selfie = await validatePrivateDocument(form.get('selfie'), 'Selfie')
+    const addressDocument = await validatePrivateDocument(form.get('addressDocument'), 'Address document')
+    const submissionId = existing?.id || crypto.randomUUID()
+    const uploadId = crypto.randomUUID()
 
+    const documents = [
+      ['id', idDocument] as const,
+      ['selfie', selfie] as const,
+      ['address', addressDocument] as const,
+    ]
+    for (const [label, document] of documents) {
+      const path = `${user.id}/kyc/${submissionId}/${uploadId}-${label}.${document.extension}`
+      const { error } = await supabase.storage.from(BUCKET).upload(path, document.file, {
+        upsert: false,
+        contentType: document.file.type,
+        cacheControl: '0',
+      })
+      if (error) throw error
+      uploaded.push(path)
+    }
+
+    const { data, error } = await supabase.rpc('submit_kyc_metadata_v2', {
+      p_submission_id: submissionId,
+      p_id_document_path: uploaded[0],
+      p_selfie_path: uploaded[1],
+      p_address_document_path: uploaded[2],
+    })
     if (error) throw error
-    return NextResponse.json({ ok: true, kyc: data })
+
+    const oldPaths = existing
+      ? [existing.id_document_path, existing.selfie_path, existing.address_document_path].filter(Boolean)
+      : []
+    if (oldPaths.length) await supabase.storage.from(BUCKET).remove(oldPaths)
+    return NextResponse.json({ ok: true, kyc: { id: submissionId, status: data } })
   } catch (error) {
-    if (uploaded.length) await supabase.storage.from('welfrise-private').remove(uploaded)
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'KYC upload failed' }, { status: 500 })
+    if (uploaded.length) await supabase.storage.from(BUCKET).remove(uploaded)
+    const safe = mapSafeError(error, 'kyc.submit')
+    return NextResponse.json({ error: safe.message }, { status: safe.status === 500 ? 400 : safe.status })
   }
 }

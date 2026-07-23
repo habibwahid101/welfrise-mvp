@@ -23,7 +23,7 @@ create table if not exists public.wallet_accounts (
 );
 
 create table if not exists public.wallet_ledger (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   direction text not null check (direction in ('credit','debit')),
   amount numeric(14,2) not null check (amount >= 0),
@@ -38,7 +38,7 @@ create table if not exists public.wallet_ledger (
 );
 
 create table if not exists public.receiving_wallets (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   internal_label text not null,
   wallet_address text not null,
   token text not null default 'USDT',
@@ -57,7 +57,7 @@ create table if not exists public.receiving_wallets (
 );
 
 create table if not exists public.binance_payment_requests (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   participant_id uuid not null references public.profiles(id) on delete cascade,
   receiving_wallet_id uuid not null references public.receiving_wallets(id),
   assigned_wallet_address text not null,
@@ -89,7 +89,7 @@ create unique index if not exists binance_payment_tx_hash_unique
   where tx_hash is not null;
 
 create table if not exists public.wallet_payment_requests (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   participant_id uuid not null references public.profiles(id) on delete cascade,
   payer_id uuid not null references public.profiles(id) on delete cascade,
   participant_display text not null,
@@ -120,7 +120,7 @@ create table if not exists public.queue_counters (
 );
 
 create table if not exists public.participation_slots (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   participant_id uuid not null references public.profiles(id) on delete cascade,
   payer_id uuid references public.profiles(id),
   referrer_id uuid references public.profiles(id),
@@ -139,7 +139,7 @@ create table if not exists public.participation_slots (
 );
 
 create table if not exists public.payout_events (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   slot_id uuid not null unique references public.participation_slots(id),
   participant_id uuid not null references public.profiles(id),
   level_id integer not null check (level_id between 1 and 5),
@@ -150,7 +150,7 @@ create table if not exists public.payout_events (
 );
 
 create table if not exists public.financial_ledger (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   entry_type text not null,
   amount numeric(14,2) not null check (amount >= 0),
   direction text not null default 'allocation' check (direction in ('allocation','credit','debit')),
@@ -166,7 +166,7 @@ create table if not exists public.financial_ledger (
 );
 
 create table if not exists public.notifications (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   notification_type text not null,
   title text not null,
@@ -712,7 +712,7 @@ begin
     and rw.token = 'USDT'
     and rw.network = 'BEP20'
     and rw.capacity_limit - rw.confirmed_amount - rw.reserved_amount >= p_amount
-  order by rw.priority, rw.created_at
+  order by rw.priority, rw.created_at, rw.id
   for update of rw skip locked
   limit 1;
 
@@ -1127,12 +1127,12 @@ begin
 
   if p_amount > 0 then
     v_balance := public.welfrise_credit_wallet(
-      v_profile.id, p_amount, 'admin_pilot_credit', 'admin_adjustment', gen_random_uuid()::text,
+      v_profile.id, p_amount, 'admin_pilot_credit', 'admin_adjustment', extensions.gen_random_uuid()::text,
       p_reason, '{}'::jsonb, v_admin
     );
   else
     v_balance := public.welfrise_debit_wallet(
-      v_profile.id, abs(p_amount), 'admin_pilot_debit', 'admin_adjustment', gen_random_uuid()::text,
+      v_profile.id, abs(p_amount), 'admin_pilot_debit', 'admin_adjustment', extensions.gen_random_uuid()::text,
       p_reason, '{}'::jsonb, v_admin
     );
   end if;
@@ -1253,7 +1253,7 @@ begin
 
   v_fee := round(p_gross_amount * 0.05, 2);
   v_net := round(p_gross_amount - v_fee, 2);
-  v_id := gen_random_uuid();
+  v_id := extensions.gen_random_uuid();
   v_balance := public.welfrise_debit_wallet(
     v_user, p_gross_amount, 'withdrawal_hold', 'withdrawal', v_id::text,
     'Withdrawal amount moved from available to held balance',

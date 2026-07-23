@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { mapSafeError } from '@/lib/safe-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,12 +10,13 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const [{ data: profile, error: profileError }, { data: appState, error: stateError }] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+    supabase.from('profiles').select('id,email,full_name,phone,referral_code,referral_code_used,kyc_status,highest_unlocked_level,championship_cycle,championship_status').eq('id', user.id).maybeSingle(),
     supabase.from('app_states').select('state, updated_at').eq('user_id', user.id).maybeSingle(),
   ])
 
   if (profileError || stateError) {
-    return NextResponse.json({ error: profileError?.message || stateError?.message }, { status: 500 })
+    const safe = mapSafeError(profileError || stateError, 'state.read')
+    return NextResponse.json({ error: safe.message }, { status: safe.status })
   }
 
   return NextResponse.json({
@@ -46,6 +48,6 @@ export async function PUT(request: Request) {
     updated_at: new Date().toISOString(),
   }, { onConflict: 'user_id' })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) { const safe = mapSafeError(error, 'state.write'); return NextResponse.json({ error: safe.message }, { status: safe.status }) }
   return NextResponse.json({ ok: true })
 }

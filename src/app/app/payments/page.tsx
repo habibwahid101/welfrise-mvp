@@ -26,6 +26,7 @@ export default async function PaymentsPage() {
         </div>
         <nav className="portal-nav">
           <Link href="/app">Dashboard</Link>
+          <Link href="/app/kyc">Profile & KYC</Link>
           {profile?.role === 'admin' ? <Link href="/admin">Admin</Link> : null}
         </nav>
       </header>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { mapSafeError } from '@/lib/safe-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,13 +9,10 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  await Promise.all([
-    supabase.rpc('welfrise_release_expired_binance_requests'),
-    supabase.rpc('welfrise_expire_wallet_payment_requests'),
-  ])
+  await supabase.rpc('welfrise_expire_stale_payment_requests')
 
   const [profileResult, walletResult, ledgerResult, binanceResult, incomingResult, outgoingResult, slotsResult, notificationsResult, withdrawalsResult] = await Promise.all([
-    supabase.from('profiles').select('full_name,email,referral_code,kyc_status,highest_unlocked_level').eq('id', user.id).single(),
+    supabase.from('profiles').select('full_name,email,referral_code,kyc_status,highest_unlocked_level,championship_cycle,championship_status').eq('id', user.id).single(),
     supabase.from('wallet_accounts').select('available_balance,held_balance,updated_at').eq('user_id', user.id).maybeSingle(),
     supabase.from('wallet_ledger').select('id,direction,amount,balance_after,entry_type,description,created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
     supabase.from('binance_payment_requests').select('id,amount,slots,level_id,championship_cycle,token,network,status,expires_at,created_at,tx_hash,assigned_wallet_address').eq('participant_id', user.id).order('created_at', { ascending: false }).limit(20),
@@ -26,7 +24,7 @@ export async function GET() {
   ])
 
   const error = profileResult.error || walletResult.error || ledgerResult.error || binanceResult.error || incomingResult.error || outgoingResult.error || slotsResult.error || notificationsResult.error || withdrawalsResult.error
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) { const safe = mapSafeError(error, 'payments.dashboard'); return NextResponse.json({ error: safe.message }, { status: safe.status }) }
 
   return NextResponse.json({
     user: { id: user.id, email: user.email },

@@ -13,10 +13,10 @@ function read(relative) {
 }
 
 const migration = read('supabase/migrations/20260723_002_payment_wallet_engine.sql')
-const prototype = read('src/assets/prototype-connected.html')
+const dashboard = read('src/app/app/page.tsx')
 const packageJson = JSON.parse(read('package.json'))
 
-check('Project is branded Welfrise', packageJson.name === 'welfrise-mvp' && !/KIMI TROPHY|KIMI Trophy/.test(prototype))
+check('Project is branded Welfrise', packageJson.name === 'welfrise-mvp' && /Welfrise/.test(dashboard))
 check('Level 1 payout is $20', /when 1 then 20::numeric/.test(migration))
 check('Other payouts are unchanged', /when 2 then 100::numeric/.test(migration) && /when 3 then 1000::numeric/.test(migration) && /when 4 then 10000::numeric/.test(migration) && /when 5 then 100000::numeric/.test(migration))
 check('Withdrawal fee is 5%', /p_gross_amount \* 0\.05/.test(migration))
@@ -34,12 +34,7 @@ check('Private storage bucket exists', /welfrise-private/.test(migration))
 check('Payment center exists', fs.existsSync(path.join(root, 'src/app/app/payments/payment-center.tsx')))
 check('Admin wallet controls exist', /admin_create_receiving_wallet/.test(migration) && /review_binance_payment/.test(migration))
 
-const scriptBodies = [...prototype.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map((match) => match[1])
-let scriptSyntax = true
-for (const body of scriptBodies) {
-  try { new Function(body) } catch { scriptSyntax = false }
-}
-check('Prototype JavaScript parses', scriptSyntax)
+check('Authenticated dashboard is native', /Member dashboard/.test(dashboard) && !/<iframe|Sandbox MVP|\/app\/prototype/.test(dashboard))
 
 const failed = checks.filter((item) => !item.pass)
 for (const item of checks) console.log(`${item.pass ? 'PASS' : 'FAIL'}  ${item.name}`)

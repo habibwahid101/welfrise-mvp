@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -15,9 +14,13 @@ export default function LoginPage() {
     setBusy(true)
     setMessage('')
     try {
-      const supabase = createClient()
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) throw error
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result.error || 'Unable to sign in.')
       window.location.href = '/app'
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to sign in.')
@@ -43,7 +46,7 @@ export default function LoginPage() {
             <label htmlFor="password">Password</label>
             <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
           </div>
-          {message ? <div className="notice error">{message}</div> : null}
+          {message ? <div className="notice error" role="alert" aria-live="polite">{message}</div> : null}
           <button className="primary-button" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           <div className="secondary-link">No account? <Link href="/register">Create one</Link></div>
         </form>

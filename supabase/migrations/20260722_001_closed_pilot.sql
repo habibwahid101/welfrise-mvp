@@ -3,7 +3,19 @@
 -- KYC intake, withdrawal requests, and an admin review console.
 -- It is intentionally a sandbox MVP and does not authorize real-money launch.
 
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
+do $$
+begin
+  if exists (
+    select 1 from pg_catalog.pg_extension e
+    join pg_catalog.pg_namespace n on n.oid = e.extnamespace
+    where e.extname = 'pgcrypto' and n.nspname <> 'extensions'
+  ) then
+    alter extension pgcrypto set schema extensions;
+  end if;
+end;
+$$;
 
 create or replace function public.generate_referral_code()
 returns text
@@ -13,7 +25,7 @@ declare
   result text;
 begin
   loop
-    result := upper(substr(encode(gen_random_bytes(8), 'hex'), 1, 8));
+    result := upper(substr(encode(extensions.gen_random_bytes(8), 'hex'), 1, 8));
     exit when not exists (select 1 from public.profiles where referral_code = result);
   end loop;
   return result;
@@ -41,7 +53,7 @@ create table if not exists public.app_states (
 );
 
 create table if not exists public.contributions (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   user_id uuid not null constraint contributions_user_id_fkey references public.profiles(id) on delete cascade,
   level_id integer not null check (level_id between 1 and 5),
   amount numeric(12,2) not null check (amount in (10,20,50,100)),
@@ -56,7 +68,7 @@ create table if not exists public.contributions (
 );
 
 create table if not exists public.withdrawals (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   user_id uuid not null constraint withdrawals_user_id_fkey references public.profiles(id) on delete cascade,
   gross_amount numeric(12,2) not null check (gross_amount >= 10 and gross_amount <= 100),
   fee_amount numeric(12,2) not null check (fee_amount >= 0),
@@ -75,7 +87,7 @@ create unique index if not exists withdrawals_one_pending_per_user
   where status = 'pending';
 
 create table if not exists public.kyc_submissions (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   user_id uuid not null constraint kyc_submissions_user_id_fkey references public.profiles(id) on delete cascade unique,
   id_document_path text not null,
   selfie_path text not null,

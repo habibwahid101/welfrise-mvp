@@ -29,6 +29,7 @@ Run these migrations in the Supabase SQL Editor **in order**:
 
 1. `supabase/migrations/20260722_001_closed_pilot.sql`
 2. `supabase/migrations/20260723_002_payment_wallet_engine.sql`
+3. `supabase/migrations/20260723_003_security_integrity_and_admin_repair.sql`
 
 Register the owner account, then promote it:
 
@@ -44,6 +45,14 @@ In the Welfrise Admin page:
 2. Set each internal capacity, such as `$10,000`, and priority.
 3. Use controlled pilot wallet adjustments only with a clear audit reason.
 
+Create a one-time pilot invitation in the SQL Editor (replace both placeholders):
+
+```sql
+insert into public.pilot_invitations(email, code_hash, expires_at, created_by)
+select lower('INVITED_EMAIL'), extensions.crypt('ONE_TIME_CODE', extensions.gen_salt('bf')), now() + interval '7 days', id
+from public.profiles where email = 'YOUR_OWNER_EMAIL' and role = 'admin';
+```
+
 ## Local environment
 
 Copy `.env.example` to `.env.local`:
@@ -56,16 +65,24 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
 Never commit `.env.local`, database passwords, service-role keys, or Supabase secret keys.
 
 ```bash
-npm install
+npm ci
+npm run verify
 npm run lint
+npm run typecheck
+npm run test
+npm run test:integration
+npm run test:e2e
 npm run build
 npm run dev
 ```
 
 Open:
 
-- `/app` — approved visual prototype reference
+- `/` — public closed-pilot home
+- `/app` — private member dashboard
 - `/app/payments` — server-controlled payments, wallet approvals, slots, ledger, and withdrawals
+- `/app/kyc` — private KYC submission and review status
+- `/account/security` — password and TOTP MFA
 - `/admin` — receiving wallets, payment review, wallet credits, KYC, and withdrawals
 - `/api/health` — deployment health
 
@@ -95,6 +112,12 @@ https://YOUR_VERCEL_DOMAIN/auth/callback
 9. Approve KYC and request a $100 withdrawal; confirm $5 fee and $95 net.
 10. Reject a withdrawal and confirm the held gross amount returns to available balance.
 
-## Launch boundary
+## Operational readiness boundary
 
-This is a **closed-pilot MVP**, not approval for unrestricted public or real-money launch. The higher-level payout funding model, legal/regulatory review, treasury controls, blockchain reconciliation, independent security testing, and operational approvals must be completed before public operation.
+- Apply migrations **001, 002, then 003**. Migration 003 repairs the pgcrypto referral generator, adds invite controls, idempotency, expiry, AAL2 admin authorization, private KYC metadata writes, immutable history protections, blockchain review fields, and the read-only treasury exposure summary.
+- Vercel requires only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; never place a service-role key in browser or Vercel public variables.
+- Set the Supabase Auth Site URL to the production Vercel origin and allow `https://YOUR_VERCEL_DOMAIN/auth/callback` as a redirect URL.
+- Admin financial and KYC mutations require a verified TOTP factor and an `aal2` session. Configure the verified BEP20 chain ID, USDT contract, and minimum confirmations in `payment_network_config` before any Binance approval; no token contract is hardcoded.
+- This remains an invitation-only **closed pilot**. The `/admin` treasury summary is exposure reporting, not evidence of sufficient funding.
+- Supabase Free projects require a manual database backup routine. Private Storage objects are not included in a database dump and require a separate encrypted backup/export process.
+- Public real-money launch remains blocked pending owner-approved treasury funding, legal/regulatory approval, independent security review, and operational reconciliation approval. The higher-level payout schedule has not been proven sustainable against the $4.50-per-$10 Level Bonus Reserve.

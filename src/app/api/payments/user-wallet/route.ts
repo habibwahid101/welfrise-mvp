@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { mapSafeError } from '@/lib/safe-errors'
 import { enforceRateLimit, requestActorKey } from '@/lib/rate-limit'
-
-const PACKAGE_SLOTS: Record<number, number> = { 10: 1, 20: 2, 50: 5, 100: 10 }
+import { calculatePaymentPackage } from '@/lib/payment-package'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -12,12 +11,15 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null)
   const payerIdentifier = String(body?.payerIdentifier || '').trim()
-  const amount = Number(body?.amount)
-  const slots = Number(body?.slots)
+  const paymentPackage = calculatePaymentPackage(body?.slots)
   const level = Number(body?.level)
 
   if (!payerIdentifier) return NextResponse.json({ error: 'Wallet owner identifier is required' }, { status: 400 })
-  if (!PACKAGE_SLOTS[amount] || PACKAGE_SLOTS[amount] !== slots) {
+  if (!paymentPackage) {
+    return NextResponse.json({ error: 'Invalid package' }, { status: 400 })
+  }
+  const { amount, slots } = paymentPackage
+  if (body && Object.prototype.hasOwnProperty.call(body, 'amount') && Number(body.amount) !== amount) {
     return NextResponse.json({ error: 'Invalid package' }, { status: 400 })
   }
   if (!Number.isInteger(level) || level < 1 || level > 5) {

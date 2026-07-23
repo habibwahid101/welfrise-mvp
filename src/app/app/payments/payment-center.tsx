@@ -1,8 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ALLOWED_SLOT_COUNTS, SLOT_PRICE_USD } from '@/lib/payment-package'
 
 type Dashboard = {
+  user?: { id?: string; email?: string }
   profile: { full_name?: string; email?: string; referral_code?: string; kyc_status?: string; highest_unlocked_level?: number }
   wallet: { available_balance: number | string; held_balance: number | string }
   ledger: Array<Record<string, unknown>>
@@ -20,17 +22,19 @@ type AssignedPayment = {
   token: string
   network: string
   amount: number | string
+  slots: number | string
+  level_id: number | string
   expires_at: string
 }
 
-const packages = [
-  { amount: 10, slots: 1 },
-  { amount: 20, slots: 2 },
-  { amount: 50, slots: 5 },
-  { amount: 100, slots: 10 },
-]
+type PaymentDetails = {
+  level: unknown
+  slots: unknown
+  amount: unknown
+}
 
 const BEP20_WALLET_PATTERN = /^0x[a-fA-F0-9]{40}$/
+const ACTIVE_BINANCE_STATUSES = new Set(['awaiting_payment', 'submitted', 'held'])
 
 function asNumber(value: unknown) {
   const number = Number(value)
@@ -47,7 +51,7 @@ function formatDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
 }
 
-function formatKycStatus(value: unknown) {
+function formatStatus(value: unknown) {
   const status = String(value || 'not_submitted').toLowerCase()
   const labels: Record<string, string> = {
     not_submitted: 'Not submitted',
@@ -57,6 +61,28 @@ function formatKycStatus(value: unknown) {
     held: 'Under review',
   }
   return labels[status] || status.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())
+}
+
+function notificationPaymentDetails(item: Record<string, unknown>, dashboard: Dashboard | null): PaymentDetails | null {
+  if (!dashboard) return null
+  const referenceId = String(item.reference_id || '')
+  const referenceType = String(item.reference_type || '')
+  if (!referenceId) return null
+
+  if (['binance_payment_request', 'binance_wallet'].includes(referenceType)) {
+    const request = dashboard.binancePayments.find((candidate) => String(candidate.id) === referenceId)
+    return request ? { level: request.level_id, slots: request.slots, amount: request.amount } : null
+  }
+  if (['wallet_payment_request', 'user_wallet'].includes(referenceType)) {
+    const requests = [...dashboard.incomingWalletRequests, ...dashboard.outgoingWalletRequests]
+    const request = requests.find((candidate) => String(candidate.id) === referenceId)
+    return request ? { level: request.level_id, slots: request.slots, amount: request.amount } : null
+  }
+  if (referenceType === 'participation_slot') {
+    const slot = dashboard.slots.find((candidate) => String(candidate.id) === referenceId)
+    return slot ? { level: slot.level_id, slots: 1, amount: SLOT_PRICE_USD } : null
+  }
+  return null
 }
 
 async function jsonRequest(url: string, init?: RequestInit) {
@@ -78,24 +104,23 @@ export default function PaymentCenter() {
   const [error, setError] = useState('')
   const [method, setMethod] = useState<'binance' | 'user-wallet'>('binance')
   const [level, setLevel] = useState(1)
-  const [packageAmount, setPackageAmount] = useState(10)
+  const [slotCount, setSlotCount] = useState(1)
   const [payerIdentifier, setPayerIdentifier] = useState('')
   const [assigned, setAssigned] = useState<AssignedPayment | null>(null)
   const [txHash, setTxHash] = useState('')
   const [proof, setProof] = useState<File | null>(null)
   const [withdrawalAmount, setWithdrawalAmount] = useState(10)
   const [withdrawalAddress, setWithdrawalAddress] = useState('')
+  const mutationBusyRef = useRef(false)
 
-  const selectedPackage = useMemo(
-    () => packages.find((item) => item.amount === packageAmount) || packages[0],
-    [packageAmount],
-  )
+  const totalAmount = slotCount * SLOT_PRICE_USD
 
   const load = useCallback(async () => {
     try {
       const data = await jsonRequest('/api/payments/dashboard', { cache: 'no-store' })
       setDashboard(data)
-      setLevel((current) => Math.min(current, Number(data.profile?.highest_unlocked_level || 1)))
+      const unlockedLevel = Math.max(1, Number(data.profile?.highest_unlocked_level || 1))
+      setLevel((current) => Math.min(Math.max(1, current), unlockedLevel))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load the payment center')
     } finally {
@@ -114,35 +139,51 @@ export default function PaymentCenter() {
   }
 
   async function createPayment() {
+    const unlockedLevel = Number(dashboard?.profile?.highest_unlocked_level || 1)
+    const validSlots = ALLOWED_SLOT_COUNTS.some((allowed) => allowed === slotCount)
+    const validLevel = Number.isInteger(level) && level >= 1 && level <= unlockedLevel
+    if (mutationBusyRef.current) return
+    if (!validSlots || !validLevel) {
+      setError('Select a valid unlocked level and number of slots.')
+      return
+    }
+    if (method === 'user-wallet' && !payerIdentifier.trim()) {
+      setError('Enter the wallet owner ID, referral code, or email.')
+      return
+    }
+
+    mutationBusyRef.current = true
     resetNotice()
     setBusy('create')
     try {
       if (method === 'binance') {
         const result = await jsonRequest('/api/payments/binance/request', {
           method: 'POST', headers: mutationHeaders('application/json'),
-          body: JSON.stringify({ amount: selectedPackage.amount, slots: selectedPackage.slots, level }),
+          body: JSON.stringify({ slots: slotCount, level }),
         })
         setAssigned(result.payment)
-        setMessage('A receiving address has been assigned to this request. Send the exact amount before expiry.')
+        setMessage(`Payment request created. Level: ${level}. Slots: ${slotCount}. Amount: ${money(totalAmount)}.`)
       } else {
         const result = await jsonRequest('/api/payments/user-wallet', {
           method: 'POST', headers: mutationHeaders('application/json'),
-          body: JSON.stringify({ payerIdentifier, amount: selectedPackage.amount, slots: selectedPackage.slots, level }),
+          body: JSON.stringify({ payerIdentifier, slots: slotCount, level }),
         })
-        setMessage(`Authorization request sent to ${result.request?.payer_display || 'the wallet owner'}.`)
+        setMessage(`Authorization request sent to ${result.request?.payer_display || 'the wallet owner'}. Level: ${level}. Slots: ${slotCount}. Amount: ${money(totalAmount)}.`)
         setPayerIdentifier('')
         await load()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create payment request')
     } finally {
+      mutationBusyRef.current = false
       setBusy('')
     }
   }
 
   async function submitBinanceProof(event: React.FormEvent) {
     event.preventDefault()
-    if (!assigned || !proof) return
+    if (!assigned || !proof || mutationBusyRef.current) return
+    mutationBusyRef.current = true
     resetNotice()
     setBusy('proof')
     try {
@@ -151,19 +192,28 @@ export default function PaymentCenter() {
       form.set('txHash', txHash)
       form.set('proof', proof)
       await jsonRequest('/api/payments/binance/submit', { method: 'POST', headers: mutationHeaders(), body: form })
-      setMessage('Payment proof submitted for admin verification.')
+      setMessage(`Payment proof submitted. Level: ${assigned.level_id}. Slots: ${assigned.slots}. Amount: ${money(assigned.amount)}.`)
       setAssigned(null)
       setTxHash('')
       setProof(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to submit payment proof')
+      const reason = err instanceof Error ? err.message : 'Unable to submit payment proof'
+      setError(`${reason} Level: ${assigned.level_id}. Slots: ${assigned.slots}. Amount: ${money(assigned.amount)}.`)
     } finally {
+      mutationBusyRef.current = false
       setBusy('')
     }
   }
 
   async function walletRequestAction(requestId: string, action: 'approve' | 'decline' | 'cancel') {
+    if (mutationBusyRef.current) return
+    const paymentRequest = [...(dashboard?.incomingWalletRequests || []), ...(dashboard?.outgoingWalletRequests || [])]
+      .find((item) => String(item.id) === requestId)
+    const paymentContext = paymentRequest
+      ? ` Level: ${String(paymentRequest.level_id)}. Slots: ${String(paymentRequest.slots)}. Amount: ${money(paymentRequest.amount)}.`
+      : ''
+    mutationBusyRef.current = true
     resetNotice()
     setBusy(requestId + action)
     try {
@@ -171,18 +221,21 @@ export default function PaymentCenter() {
         method: 'PATCH', headers: mutationHeaders('application/json'),
         body: JSON.stringify({ requestId, action }),
       })
-      setMessage(`Request ${String(result.status).replaceAll('_', ' ')}.`)
+      setMessage(`Request ${String(result.status).replaceAll('_', ' ')}.${paymentContext}`)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to update request')
+      const reason = err instanceof Error ? err.message : 'Unable to update request'
+      setError(`${reason}${paymentContext}`)
     } finally {
+      mutationBusyRef.current = false
       setBusy('')
     }
   }
 
   async function requestWithdrawal(event: React.FormEvent) {
     event.preventDefault()
-    if (withdrawalDisabledReason) return
+    if (withdrawalDisabledReason || mutationBusyRef.current) return
+    mutationBusyRef.current = true
     resetNotice()
     setBusy('withdrawal')
     try {
@@ -196,6 +249,7 @@ export default function PaymentCenter() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to submit withdrawal')
     } finally {
+      mutationBusyRef.current = false
       setBusy('')
     }
   }
@@ -205,7 +259,19 @@ export default function PaymentCenter() {
   const available = asNumber(dashboard?.wallet?.available_balance)
   const held = asNumber(dashboard?.wallet?.held_balance)
   const unlocked = Number(dashboard?.profile?.highest_unlocked_level || 1)
+  const participant = dashboard?.profile?.full_name || dashboard?.profile?.email || dashboard?.user?.email || 'Current participant'
   const kycStatus = String(dashboard?.profile?.kyc_status || 'not_submitted').toLowerCase()
+  const selectedSlotsValid = ALLOWED_SLOT_COUNTS.some((allowed) => allowed === slotCount)
+  const selectedLevelValid = Number.isInteger(level) && level >= 1 && level <= unlocked
+  const paymentDisabledReason = busy
+    ? 'A payment action is already processing.'
+    : !selectedLevelValid
+      ? 'Select an unlocked level.'
+      : !selectedSlotsValid
+        ? 'Select 1, 2, 5, or 10 slots.'
+        : method === 'user-wallet' && !payerIdentifier.trim()
+          ? 'Enter the wallet owner ID, referral code, or email.'
+          : ''
   const fee = Math.round(withdrawalAmount * 5) / 100
   const net = Math.round((withdrawalAmount - fee) * 100) / 100
   const withdrawalAmountValid = Number.isFinite(withdrawalAmount) && withdrawalAmount >= 10 && withdrawalAmount <= 100
@@ -221,6 +287,7 @@ export default function PaymentCenter() {
           : !withdrawalAddressValid
             ? 'Enter a valid BEP20 wallet address.'
             : ''
+  const activeBinance = (dashboard?.binancePayments || []).filter((item) => ACTIVE_BINANCE_STATUSES.has(String(item.status)))
 
   return (
     <div className="portal-stack">
@@ -231,59 +298,117 @@ export default function PaymentCenter() {
         <div><span>Available wallet</span><strong>{money(available)}</strong></div>
         <div><span>Held balance</span><strong>{money(held)}</strong></div>
         <div><span>Unlocked level</span><strong>Level {unlocked}</strong></div>
-        <div><span>KYC status</span><strong>{formatKycStatus(kycStatus)}</strong></div>
+        <div><span>KYC status</span><strong>{formatStatus(kycStatus)}</strong></div>
       </section>
 
-      <section className="portal-panel">
+      <section className="portal-panel payment-create-panel">
         <div className="panel-title-row">
-          <div><h2>Purchase participation slots</h2><p>Commission always follows the participant’s registered referrer.</p></div>
-          <button className="ghost-button" type="button" onClick={() => void load()}>Refresh</button>
+          <div><h2>Purchase participation slots</h2><p>One participation slot costs $10. Commission always follows the participant’s registered referrer.</p></div>
+          <button className="ghost-button" type="button" disabled={Boolean(busy)} onClick={() => void load()}>Refresh</button>
         </div>
 
-        <div className="method-switch">
-          <button type="button" className={method === 'binance' ? 'active' : ''} onClick={() => { setMethod('binance'); setAssigned(null) }}>Pay by Binance Wallet</button>
-          <button type="button" className={method === 'user-wallet' ? 'active' : ''} onClick={() => { setMethod('user-wallet'); setAssigned(null) }}>Pay by User Wallet</button>
+        <div className="method-switch" role="group" aria-label="Payment method">
+          <button type="button" disabled={Boolean(busy)} className={method === 'binance' ? 'active' : ''} onClick={() => { setMethod('binance'); setAssigned(null) }}>Pay by Binance Wallet</button>
+          <button type="button" disabled={Boolean(busy)} className={method === 'user-wallet' ? 'active' : ''} onClick={() => { setMethod('user-wallet'); setAssigned(null) }}>Pay by User Wallet</button>
         </div>
 
-        <div className="form-grid">
-          <label>Level<select value={level} onChange={(e) => setLevel(Number(e.target.value))}>{Array.from({ length: unlocked }, (_, index) => <option key={index + 1} value={index + 1}>Level {index + 1}</option>)}</select></label>
-          <label>Package<select value={packageAmount} onChange={(e) => setPackageAmount(Number(e.target.value))}>{packages.map((item) => <option key={item.amount} value={item.amount}>{money(item.amount)} · {item.slots} slot{item.slots > 1 ? 's' : ''}</option>)}</select></label>
-          {method === 'user-wallet' ? <label>Wallet owner ID, referral code, or email<input value={payerIdentifier} onChange={(e) => setPayerIdentifier(e.target.value)} placeholder="Enter wallet owner identifier" /></label> : null}
+        <div className="form-grid payment-fields">
+          <label>Level<select value={level} disabled={Boolean(busy)} onChange={(event) => setLevel(Number(event.target.value))}>{Array.from({ length: unlocked }, (_, index) => <option key={index + 1} value={index + 1}>Level {index + 1}</option>)}</select></label>
+          <label>Number of slots<select value={slotCount} disabled={Boolean(busy)} onChange={(event) => setSlotCount(Number(event.target.value))}>{ALLOWED_SLOT_COUNTS.map((count) => <option key={count} value={count}>{count} slot{count > 1 ? 's' : ''}</option>)}</select></label>
+          <label>Total amount<input value={money(totalAmount)} readOnly aria-readonly="true" /></label>
+          {method === 'user-wallet' ? <label className="payment-owner-field">Wallet owner ID, referral code, or email<input value={payerIdentifier} disabled={Boolean(busy)} onChange={(event) => setPayerIdentifier(event.target.value)} placeholder="Enter wallet owner identifier" required /></label> : null}
         </div>
+        <span className="sr-only" aria-live="polite">Total amount {money(totalAmount)}</span>
 
-        <div className="rule-box">
-          {method === 'binance'
+        <section className="payment-summary" aria-labelledby="payment-summary-title">
+          <h3 id="payment-summary-title">Payment summary</h3>
+          <dl className="payment-summary-grid">
+            <div><dt>Participant</dt><dd>{participant}</dd></div>
+            <div><dt>Level</dt><dd>Level {level}</dd></div>
+            <div><dt>Number of slots</dt><dd>{slotCount}</dd></div>
+            <div><dt>{method === 'binance' ? 'Amount to pay' : 'Amount to authorize'}</dt><dd>{money(totalAmount)}</dd></div>
+            <div><dt>{method === 'binance' ? 'Payment method' : 'Payment source'}</dt><dd>{method === 'binance' ? 'Binance Wallet' : payerIdentifier.trim() || 'Not entered'}</dd></div>
+          </dl>
+          <p><strong>Commission:</strong> Commission goes to the participant’s registered referrer.</p>
+          {method === 'user-wallet' ? <p><strong>Important:</strong> The wallet owner supplies the balance only. The wallet owner does not receive the referral commission unless that wallet owner is independently the participant’s registered referrer.</p> : null}
+          <p>{method === 'binance'
             ? 'A secure payment address will be assigned for this payment request.'
-            : 'The wallet owner receives Approve or Decline. No deduction, slot, or commission occurs before approval.'}
+            : 'The wallet owner receives Approve or Decline. No deduction, slot, or commission occurs before approval.'}</p>
+        </section>
+
+        <div className="payment-submit">
+          <button className="primary-button portal-action" type="button" disabled={Boolean(paymentDisabledReason)} onClick={() => void createPayment()}>{busy === 'create' ? (method === 'binance' ? 'Generating address…' : 'Sending request…') : method === 'binance' ? 'Generate payment address' : 'Send authorization request'}</button>
+          {paymentDisabledReason ? <p className="small-muted" role="status">{paymentDisabledReason}</p> : null}
         </div>
-        <button className="primary-button portal-action" type="button" disabled={busy === 'create' || (method === 'user-wallet' && !payerIdentifier.trim())} onClick={() => void createPayment()}>{busy === 'create' ? 'Creating…' : method === 'binance' ? 'Generate payment address' : 'Send authorization request'}</button>
       </section>
 
       {assigned ? <section className="portal-panel assigned-card">
         <h2>Active Binance payment request</h2>
-        <p>Send exactly <strong>{money(assigned.amount)} {assigned.token}</strong> through <strong>{assigned.network}</strong>.</p>
+        <dl className="request-details">
+          <div><dt>Level</dt><dd>Level {assigned.level_id}</dd></div>
+          <div><dt>Number of slots</dt><dd>{assigned.slots}</dd></div>
+          <div><dt>Amount</dt><dd>{money(assigned.amount)} {assigned.token}</dd></div>
+          <div><dt>Network</dt><dd>{assigned.network}</dd></div>
+        </dl>
+        <p>Send the exact amount to the secure address below.</p>
         <div className="copy-row"><code>{assigned.wallet_address}</code><button type="button" onClick={() => void navigator.clipboard.writeText(assigned.wallet_address)}>Copy</button></div>
         <p className="small-muted">Expires: {formatDate(assigned.expires_at)}. The assigned address will not change during this request.</p>
         <form className="form-grid single-column" onSubmit={submitBinanceProof}>
-          <label>Transaction hash<input value={txHash} onChange={(e) => setTxHash(e.target.value)} minLength={10} required /></label>
-          <label>Payment proof<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => setProof(e.target.files?.[0] || null)} required /></label>
-          <button className="primary-button" disabled={busy === 'proof'}>{busy === 'proof' ? 'Submitting…' : 'Submit payment proof'}</button>
+          <label>Transaction hash<input value={txHash} disabled={Boolean(busy)} onChange={(event) => setTxHash(event.target.value)} minLength={10} required /></label>
+          <label>Payment proof<input type="file" disabled={Boolean(busy)} accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => setProof(event.target.files?.[0] || null)} required /></label>
+          <button className="primary-button" disabled={Boolean(busy)}>{busy === 'proof' ? 'Submitting…' : 'Submit payment proof'}</button>
         </form>
       </section> : null}
+
+      <section className="portal-panel">
+        <h2>Active Binance payment requests</h2>
+        <div className="request-list">{activeBinance.length ? activeBinance.map((item) => <article key={String(item.id)} className="request-card"><div>
+          <dl className="request-details">
+            <div><dt>Level</dt><dd>Level {String(item.level_id)}</dd></div>
+            <div><dt>Slots</dt><dd>{String(item.slots)}</dd></div>
+            <div><dt>Amount</dt><dd>{money(item.amount)} {String(item.token || 'USDT')}</dd></div>
+            <div><dt>Status</dt><dd>{formatStatus(item.status)}</dd></div>
+          </dl>
+          <small>Expires {formatDate(item.expires_at)}</small>
+          {item.assigned_wallet_address ? <code className="request-address">{String(item.assigned_wallet_address)}</code> : null}
+        </div></article>) : <p className="empty-copy">No active Binance payment requests.</p>}</div>
+      </section>
 
       <section className="portal-grid-two">
         <div className="portal-panel">
           <h2>Requests needing your approval</h2>
           <div className="request-list">{(dashboard?.incomingWalletRequests || []).length ? dashboard!.incomingWalletRequests.map((item) => {
             const pending = item.status === 'pending'
-            return <article key={String(item.id)} className="request-card"><div><strong>{String(item.participant_display || 'Participant')}</strong><span>{money(item.amount)} · Level {String(item.level_id)} · {String(item.slots)} slot(s)</span><small>Balance before: {money(available)} · after approval: {money(Math.max(0, available - asNumber(item.amount)))}</small><small>The participant receives the slot(s); commission follows the participant’s registered referrer.</small><small>{formatKycStatus(item.status)} · expires {formatDate(item.expires_at)}</small></div>{pending ? <div className="inline-actions"><button disabled={Boolean(busy)} onClick={() => { if (window.confirm(`Approve ${money(item.amount)} for ${String(item.participant_display || 'this participant')}? Your wallet will be debited.`)) void walletRequestAction(String(item.id), 'approve') }}>Approve</button><button className="danger-button" disabled={Boolean(busy)} onClick={() => void walletRequestAction(String(item.id), 'decline')}>Decline</button></div> : null}</article>
+            const requestId = String(item.id)
+            return <article key={requestId} className="request-card"><div>
+              <dl className="request-details">
+                <div><dt>Participant</dt><dd>{String(item.participant_display || 'Participant')}</dd></div>
+                <div><dt>Level</dt><dd>Level {String(item.level_id)}</dd></div>
+                <div><dt>Slots</dt><dd>{String(item.slots)}</dd></div>
+                <div><dt>Amount requested</dt><dd>{money(item.amount)}</dd></div>
+                <div><dt>Current available balance</dt><dd>{money(available)}</dd></div>
+                <div><dt>Balance after approval</dt><dd>{available >= asNumber(item.amount) ? money(available - asNumber(item.amount)) : 'Insufficient balance'}</dd></div>
+                <div className="detail-wide"><dt>Commission</dt><dd>Follows the participant’s registered referrer after approval.</dd></div>
+              </dl>
+              <small>{formatStatus(item.status)} · expires {formatDate(item.expires_at)}</small>
+            </div>{pending ? <div className="inline-actions"><button disabled={Boolean(busy)} onClick={() => { if (window.confirm(`Approve ${money(item.amount)} for ${String(item.participant_display || 'this participant')}? Level ${String(item.level_id)}, ${String(item.slots)} slot(s). Your wallet will be debited.`)) void walletRequestAction(requestId, 'approve') }}>{busy === requestId + 'approve' ? 'Approving…' : 'Approve'}</button><button className="danger-button" disabled={Boolean(busy)} onClick={() => void walletRequestAction(requestId, 'decline')}>{busy === requestId + 'decline' ? 'Declining…' : 'Decline'}</button></div> : null}</article>
           }) : <p className="empty-copy">No wallet authorization requests.</p>}</div>
         </div>
 
         <div className="portal-panel">
           <h2>Your outgoing wallet requests</h2>
           <div className="request-list">{(dashboard?.outgoingWalletRequests || []).length ? dashboard!.outgoingWalletRequests.map((item) => {
-            return <article key={String(item.id)} className="request-card"><div><strong>{String(item.payer_display || 'Wallet owner')}</strong><span>{money(item.amount)} · Level {String(item.level_id)} · {String(item.slots)} slot(s)</span><small>{formatKycStatus(item.status)} · {formatDate(item.created_at)}</small></div>{item.status === 'pending' ? <button className="danger-button" disabled={Boolean(busy)} onClick={() => void walletRequestAction(String(item.id), 'cancel')}>Cancel</button> : null}</article>
+            const requestId = String(item.id)
+            return <article key={requestId} className="request-card"><div>
+              <dl className="request-details">
+                <div><dt>Wallet owner</dt><dd>{String(item.payer_display || 'Wallet owner')}</dd></div>
+                <div><dt>Level</dt><dd>Level {String(item.level_id)}</dd></div>
+                <div><dt>Slots</dt><dd>{String(item.slots)}</dd></div>
+                <div><dt>Amount</dt><dd>{money(item.amount)}</dd></div>
+                <div><dt>Status</dt><dd>{formatStatus(item.status)}</dd></div>
+              </dl>
+              <small>{formatDate(item.created_at)}</small>
+            </div>{item.status === 'pending' ? <button className="danger-button" disabled={Boolean(busy)} onClick={() => void walletRequestAction(requestId, 'cancel')}>{busy === requestId + 'cancel' ? 'Cancelling…' : 'Cancel'}</button> : null}</article>
           }) : <p className="empty-copy">No outgoing requests.</p>}</div>
         </div>
       </section>
@@ -292,8 +417,8 @@ export default function PaymentCenter() {
         <h2>Withdraw funds</h2>
         <p>Approved KYC is required. The fee is 5% of the gross request and the daily gross limit is $100.</p>
         <form className="form-grid" onSubmit={requestWithdrawal}>
-          <label>Gross amount<input type="number" min={10} max={100} step="0.01" value={withdrawalAmount} onChange={(e) => setWithdrawalAmount(Number(e.target.value))} /></label>
-          <label>BEP20 wallet address<input value={withdrawalAddress} onChange={(e) => setWithdrawalAddress(e.target.value)} placeholder="0x…" required /></label>
+          <label>Gross amount<input type="number" min={10} max={100} step="0.01" value={withdrawalAmount} onChange={(event) => setWithdrawalAmount(Number(event.target.value))} /></label>
+          <label>BEP20 wallet address<input value={withdrawalAddress} onChange={(event) => setWithdrawalAddress(event.target.value)} placeholder="0x…" required /></label>
           <div className="withdrawal-preview"><span>Gross {money(withdrawalAmount)}</span><span>Fee {money(fee)}</span><strong>Net {money(net)}</strong></div>
           <div className="withdrawal-submit">
             <button className="primary-button" disabled={Boolean(withdrawalDisabledReason)}>{busy === 'withdrawal' ? 'Submitting…' : 'Request withdrawal'}</button>
@@ -303,11 +428,14 @@ export default function PaymentCenter() {
       </section>
 
       <section className="portal-grid-two">
-        <div className="portal-panel"><h2>Recent participation slots</h2><div className="compact-list">{(dashboard?.slots || []).slice(0, 12).map((item) => <div key={String(item.id)}><span>Level {String(item.level_id)} · Position {String(item.level_position)}</span><strong>{String(item.status)}{asNumber(item.payout_amount) ? ` · ${money(item.payout_amount)}` : ''}</strong></div>)}{!dashboard?.slots?.length ? <p className="empty-copy">No server-approved slots yet.</p> : null}</div></div>
-        <div className="portal-panel"><h2>Wallet history</h2><div className="compact-list">{(dashboard?.ledger || []).slice(0, 12).map((item) => <div key={String(item.id)}><span>{String(item.description)}<small>{formatDate(item.created_at)}</small></span><strong className={item.direction === 'credit' ? 'positive' : 'negative'}>{item.direction === 'credit' ? '+' : '-'}{money(item.amount)}</strong></div>)}{!dashboard?.ledger?.length ? <p className="empty-copy">No wallet entries yet.</p> : null}</div></div>
+        <div className="portal-panel"><h2>Recent participation slots</h2><div className="compact-list">{(dashboard?.slots || []).slice(0, 12).map((item) => <div key={String(item.id)}><span><strong>Level {String(item.level_id)}</strong><small>Slots: 1 · Amount: {money(SLOT_PRICE_USD)} · Position {String(item.level_position)}</small></span><strong>{formatStatus(item.status)}{asNumber(item.payout_amount) ? ` · ${money(item.payout_amount)} payout` : ''}</strong></div>)}{!dashboard?.slots?.length ? <p className="empty-copy">No server-approved slots yet.</p> : null}</div></div>
+        <div className="portal-panel"><h2>Wallet history</h2><div className="compact-list">{(dashboard?.ledger || []).slice(0, 12).map((item) => <div key={String(item.id)}><span>{String(item.description)}<small>{formatDate(item.created_at)}</small></span><strong className={item.direction === 'credit' ? 'positive' : 'negative'}>Amount: {item.direction === 'credit' ? '+' : '-'}{money(item.amount)}</strong></div>)}{!dashboard?.ledger?.length ? <p className="empty-copy">No wallet entries yet.</p> : null}</div></div>
       </section>
 
-      <section className="portal-panel"><h2>Notifications</h2><div className="compact-list">{(dashboard?.notifications || []).slice(0, 12).map((item) => <div key={String(item.id)}><span><strong>{String(item.title)}</strong><small>{String(item.message)} · {formatDate(item.created_at)}</small></span></div>)}{!dashboard?.notifications?.length ? <p className="empty-copy">No notifications.</p> : null}</div></section>
+      <section className="portal-panel"><h2>Notifications</h2><div className="compact-list">{(dashboard?.notifications || []).slice(0, 12).map((item) => {
+        const details = notificationPaymentDetails(item, dashboard)
+        return <div key={String(item.id)}><span><strong>{String(item.title)}</strong><small>{String(item.message)}</small>{details ? <small>Level: {String(details.level)} · Slots: {String(details.slots)} · Amount: {money(details.amount)}</small> : null}<small>{formatDate(item.created_at)}</small></span></div>
+      })}{!dashboard?.notifications?.length ? <p className="empty-copy">No notifications.</p> : null}</div></section>
     </div>
   )
 }

@@ -11,6 +11,14 @@ const adminActionsPath = 'src/app/admin/actions.ts'
 const adminActions = fs.readFileSync(adminActionsPath,'utf8')
 const adminActionState = fs.readFileSync('src/app/admin/action-state.ts','utf8')
 const adminForms = fs.readFileSync('src/app/admin/admin-forms.tsx','utf8')
+const paymentCenter = fs.readFileSync('src/app/app/payments/payment-center.tsx','utf8')
+const paymentPackageSource = fs.readFileSync('src/lib/payment-package.ts','utf8')
+const binancePaymentRoute = fs.readFileSync('src/app/api/payments/binance/request/route.ts','utf8')
+const userWalletPaymentRoute = fs.readFileSync('src/app/api/payments/user-wallet/route.ts','utf8')
+const paymentDashboardRoute = fs.readFileSync('src/app/api/payments/dashboard/route.ts','utf8')
+const adminPage = fs.readFileSync('src/app/admin/page.tsx','utf8')
+const memberDashboard = fs.readFileSync('src/app/app/page.tsx','utf8')
+const paymentMigration = fs.readFileSync('supabase/migrations/20260723_002_payment_wallet_engine.sql','utf8')
 
 function sourceFile(file, source = fs.readFileSync(file,'utf8')) {
   return ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
@@ -83,6 +91,56 @@ async function loadAdminActionHarness() {
     .replace("'@/lib/safe-errors'",JSON.stringify(safeErrorsModule))
   const actions = await import(dataModule(javascript))
   return { actions, state, dispose: () => { delete globalThis[key] } }
+}
+
+async function loadPaymentPackageHarness() {
+  const javascript = ts.transpileModule(paymentPackageSource,{ compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+  return import(dataModule(javascript))
+}
+
+async function loadPaymentRouteHarness(routePath, routeSource) {
+  const key = `__welfrisePaymentRouteHarness${Math.random().toString(36).slice(2)}`
+  const state = { rpcCalls: [] }
+  globalThis[key] = state
+
+  const nextServerModule = dataModule(`
+    export const NextResponse = {
+      json(body,init = {}) { return { body, status: init.status || 200 } },
+    }
+  `)
+  const safeErrorsModule = dataModule("export function mapSafeError() { return { message:'Safe payment error.', status:400 } }")
+  const rateLimitModule = dataModule("export async function enforceRateLimit() {} export async function requestActorKey() { return 'actor' }")
+  const supabaseModule = dataModule(`
+    export async function createClient() {
+      const state = globalThis[${JSON.stringify(key)}]
+      return {
+        auth: { getUser: async () => ({ data: { user: { id:'participant-id', email:'member@example.com' } } }) },
+        rpc: async (name,args) => {
+          state.rpcCalls.push({ name,args })
+          if (name === 'create_binance_payment_request_v2') return { data: { request_id:'binance-request', wallet_address:'0xsecure', token:'USDT', network:'BEP20', expires_at:'2026-07-25T00:00:00Z' }, error:null }
+          return { data: { id:'wallet-request', payer_display:'Wallet owner' }, error:null }
+        },
+      }
+    }
+  `)
+  const packageJavascript = ts.transpileModule(paymentPackageSource,{ compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+  const packageModule = dataModule(packageJavascript)
+  const javascript = ts.transpileModule(routeSource,{ compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+    .replace("'next/server'",JSON.stringify(nextServerModule))
+    .replace("'@/lib/supabase/server'",JSON.stringify(supabaseModule))
+    .replace("'@/lib/safe-errors'",JSON.stringify(safeErrorsModule))
+    .replace("'@/lib/rate-limit'",JSON.stringify(rateLimitModule))
+    .replace("'@/lib/payment-package'",JSON.stringify(packageModule))
+  const route = await import(dataModule(`${javascript}\n//# sourceURL=${routePath}`))
+  return { route, state, dispose: () => { delete globalThis[key] } }
+}
+
+function paymentRequest(body) {
+  return new Request('https://welfrise.example/api/payment',{
+    method:'POST',
+    headers:{ 'content-type':'application/json', 'idempotency-key':'payment-test-key' },
+    body:JSON.stringify(body),
+  })
 }
 
 test('/app is a native dashboard and the old prototype route redirects', () => {
@@ -227,4 +285,177 @@ test('rapid duplicate Admin review submission remains blocked while pending', ()
   assert.match(adminForms,/disabled=\{pending \|\| disabled\}/)
   assert.match(kycReviewFormSource(),/onSubmit=\{prepare\}/)
   assert.match(adminForms,/if \(keyRef\.current && !keyRef\.current\.value\) keyRef\.current\.value = crypto\.randomUUID\(\)/)
+})
+
+// Approved Level / Slots / Amount payment structure: 22 regression checks.
+test('payment 1/22: slot selector contains only 1, 2, 5, and 10', async () => {
+  const paymentPackage = await loadPaymentPackageHarness()
+  assert.deepEqual([...paymentPackage.ALLOWED_SLOT_COUNTS],[1,2,5,10])
+  assert.match(paymentCenter,/Number of slots<select/)
+  assert.doesNotMatch(paymentCenter,/<label>Package<select/)
+})
+
+test('payment 2/22: selecting 1 slot calculates and displays $10.00', async () => {
+  const paymentPackage = await loadPaymentPackageHarness()
+  assert.deepEqual(paymentPackage.calculatePaymentPackage(1),{ slots:1, amount:10 })
+  assert.match(paymentCenter,/const totalAmount = slotCount \* SLOT_PRICE_USD/)
+  assert.match(paymentCenter,/money\(totalAmount\)/)
+})
+
+test('payment 3/22: selecting 2 slots calculates and displays $20.00', async () => {
+  const paymentPackage = await loadPaymentPackageHarness()
+  assert.deepEqual(paymentPackage.calculatePaymentPackage(2),{ slots:2, amount:20 })
+  assert.equal(`$${paymentPackage.calculatePaymentPackage(2).amount.toFixed(2)}`,'$20.00')
+})
+
+test('payment 4/22: selecting 5 slots calculates and displays $50.00', async () => {
+  const paymentPackage = await loadPaymentPackageHarness()
+  assert.deepEqual(paymentPackage.calculatePaymentPackage(5),{ slots:5, amount:50 })
+  assert.equal(`$${paymentPackage.calculatePaymentPackage(5).amount.toFixed(2)}`,'$50.00')
+})
+
+test('payment 5/22: selecting 10 slots calculates and displays $100.00', async () => {
+  const paymentPackage = await loadPaymentPackageHarness()
+  assert.deepEqual(paymentPackage.calculatePaymentPackage(10),{ slots:10, amount:100 })
+  assert.equal(`$${paymentPackage.calculatePaymentPackage(10).amount.toFixed(2)}`,'$100.00')
+})
+
+test('payment 6/22: total amount control is explicitly read-only and visibly styled', () => {
+  assert.match(paymentCenter,/<label>Total amount<input value=\{money\(totalAmount\)\} readOnly aria-readonly="true" \/><\/label>/)
+  assert.match(styles,/\.payment-fields input\[readonly\] \{[^}]*background:[^}]*font-weight:/)
+})
+
+test('payment 7/22: user cannot manually change the amount or submit it as authority', () => {
+  const totalAmountControl = paymentCenter.match(/<label>Total amount<input[^>]+>/)?.[0] || ''
+  assert.doesNotMatch(totalAmountControl,/onChange=/)
+  assert.match(paymentCenter,/body: JSON\.stringify\(\{ slots: slotCount, level \}\)/)
+  assert.match(paymentCenter,/body: JSON\.stringify\(\{ payerIdentifier, slots: slotCount, level \}\)/)
+})
+
+test('payment 8/22: wallet-owner identifier field is conditional on User Wallet', () => {
+  assert.match(paymentCenter,/method === 'user-wallet' \? <label className="payment-owner-field">Wallet owner ID, referral code, or email/)
+  assert.match(paymentCenter,/placeholder="Enter wallet owner identifier"/)
+})
+
+test('payment 9/22: Binance flow does not render the wallet-owner field', () => {
+  assert.doesNotMatch(paymentCenter,/method === 'binance' \? <label[^>]*>Wallet owner ID/)
+  assert.equal((paymentCenter.match(/Wallet owner ID, referral code, or email<input/g) || []).length,1)
+})
+
+test('payment 10/22: User Wallet action is disabled until an owner identifier is entered', () => {
+  assert.match(paymentCenter,/method === 'user-wallet' && !payerIdentifier\.trim\(\)/)
+  assert.match(paymentCenter,/disabled=\{Boolean\(paymentDisabledReason\)\}/)
+  assert.match(paymentCenter,/Enter the wallet owner ID, referral code, or email\./)
+})
+
+test('payment 11/22: both servers derive the RPC amount from slot count', async () => {
+  for (const [routePath,routeSource,rpcName,extra] of [
+    ['binance/request/route.ts',binancePaymentRoute,'create_binance_payment_request_v2',{}],
+    ['user-wallet/route.ts',userWalletPaymentRoute,'create_user_wallet_payment_request_v2',{ payerIdentifier:'OWNER-CODE' }],
+  ]) {
+    const harness = await loadPaymentRouteHarness(routePath,routeSource)
+    try {
+      const response = await harness.route.POST(paymentRequest({ ...extra, level:2, slots:5 }))
+      assert.equal(response.status,200)
+      assert.equal(harness.state.rpcCalls[0].name,rpcName)
+      assert.equal(harness.state.rpcCalls[0].args.p_slots,5)
+      assert.equal(harness.state.rpcCalls[0].args.p_amount,50)
+    } finally { harness.dispose() }
+  }
+})
+
+test('payment 12/22: manipulated client amounts cannot alter either server-calculated amount', async () => {
+  for (const [routePath,routeSource,extra] of [
+    ['binance/request/route.ts',binancePaymentRoute,{}],
+    ['user-wallet/route.ts',userWalletPaymentRoute,{ payerIdentifier:'OWNER-CODE' }],
+  ]) {
+    const harness = await loadPaymentRouteHarness(routePath,routeSource)
+    try {
+      const response = await harness.route.POST(paymentRequest({ ...extra, level:1, slots:1, amount:100 }))
+      assert.equal(response.status,400)
+      assert.deepEqual(response.body,{ error:'Invalid package' })
+      assert.equal(harness.state.rpcCalls.length,0)
+    } finally { harness.dispose() }
+  }
+})
+
+test('payment 13/22: invalid slot counts are rejected before either RPC executes', async () => {
+  for (const [routePath,routeSource,extra] of [
+    ['binance/request/route.ts',binancePaymentRoute,{}],
+    ['user-wallet/route.ts',userWalletPaymentRoute,{ payerIdentifier:'OWNER-CODE' }],
+  ]) {
+    const harness = await loadPaymentRouteHarness(routePath,routeSource)
+    try {
+      const response = await harness.route.POST(paymentRequest({ ...extra, level:1, slots:3 }))
+      assert.equal(response.status,400)
+      assert.deepEqual(response.body,{ error:'Invalid package' })
+      assert.equal(harness.state.rpcCalls.length,0)
+    } finally { harness.dispose() }
+  }
+})
+
+test('payment 14/22: outgoing requests display Level, Slots, and Amount separately', () => {
+  const outgoing = paymentCenter.slice(paymentCenter.indexOf('Your outgoing wallet requests'),paymentCenter.indexOf('Withdraw funds'))
+  for (const label of ['<dt>Level</dt>','<dt>Slots</dt>','<dt>Amount</dt>']) assert.match(outgoing,new RegExp(label))
+  assert.doesNotMatch(outgoing,/Level\/package|money\(item\.amount\).*Level/)
+})
+
+test('payment 15/22: incoming approval cards show all decision-critical values separately', () => {
+  const incoming = paymentCenter.slice(paymentCenter.indexOf('Requests needing your approval'),paymentCenter.indexOf('Your outgoing wallet requests'))
+  for (const label of ['Participant','Level','Slots','Amount requested','Current available balance','Balance after approval','Commission']) assert.match(incoming,new RegExp(`<dt>${label}</dt>`))
+  assert.match(incoming,/\? 'Approving…' : 'Approve'/)
+  assert.match(incoming,/\? 'Declining…' : 'Decline'/)
+})
+
+test('payment 16/22: Admin payment tables separate Level, Slots, and Amount', () => {
+  assert.ok((adminPage.match(/<th>Level<\/th><th>Slots<\/th><th>Amount<\/th>/g) || []).length >= 2)
+  assert.doesNotMatch(adminPage,/<th>Level\/package<\/th>/)
+  assert.doesNotMatch(adminPage,/money\(item\.amount\) · \{item\.slots\} slots/)
+})
+
+test('payment 17/22: commission copy follows the participant registered referrer', () => {
+  assert.match(paymentCenter,/Commission goes to the participant’s registered referrer\./)
+  assert.match(paymentCenter,/wallet owner supplies the balance only/)
+  assert.match(paymentCenter,/wallet owner does not receive the referral commission unless/)
+  assert.match(paymentCenter,/Follows the participant’s registered referrer after approval\./)
+})
+
+test('payment 18/22: a synchronous guard prevents rapid duplicate payment submissions', () => {
+  assert.match(paymentCenter,/if \(mutationBusyRef\.current\) return/)
+  assert.match(paymentCenter,/mutationBusyRef\.current = true[\s\S]+setBusy\('create'\)/)
+  assert.match(paymentCenter,/finally \{[\s\S]*mutationBusyRef\.current = false[\s\S]*setBusy\(''\)/)
+  assert.equal((paymentCenter.match(/jsonRequest\('\/api\/payments\/binance\/request'/g) || []).length,1)
+  assert.equal((paymentCenter.match(/jsonRequest\('\/api\/payments\/user-wallet'/g) || []).length,2)
+})
+
+test('payment 19/22: existing pending requests remain compatible with structured displays', () => {
+  assert.match(paymentDashboardRoute,/wallet_payment_requests'\)\.select\('id,participant_id,payer_id,participant_display,payer_display,amount,slots,level_id/)
+  assert.match(memberDashboard,/select\('id,participant_display,amount,slots,level_id,status,expires_at'\)/)
+  assert.match(memberDashboard,/Level: \{item\.level_id\} · Slots: \{item\.slots\}/)
+  assert.match(paymentCenter,/dashboard!\.incomingWalletRequests\.map/)
+  assert.match(paymentCenter,/dashboard!\.outgoingWalletRequests\.map/)
+})
+
+test('payment 20/22: desktop and tablet payment layouts are balanced at three and two columns', () => {
+  assert.match(styles,/\.payment-fields \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/)
+  assert.match(styles,/@media \(max-width: 820px\) \{[\s\S]*\.payment-fields, \.payment-summary-grid \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/)
+  assert.match(styles,/\.payment-owner-field \{ grid-column: 1 \/ -1; \}/)
+})
+
+test('payment 21/22: mobile layout is one column with full-width overflow-safe controls', () => {
+  assert.match(styles,/@media \(max-width: 560px\) \{[\s\S]*\.portal-metrics, \.form-grid[^}]*grid-template-columns: 1fr;/)
+  assert.match(styles,/\.portal-action \{ width: 100%; \}/)
+  assert.match(styles,/\.request-card \{ min-width: 0;/)
+  assert.match(styles,/\.request-address \{[^}]*overflow-wrap: anywhere;/)
+})
+
+test('payment 22/22: locked financial, referral, FIFO, payout, and championship rules remain intact', () => {
+  assert.match(paymentMigration,/when 1 then 20::numeric/)
+  assert.match(paymentMigration,/if v_waiting \+ p_slots > 10 then/)
+  assert.match(paymentMigration,/mod\(v_position - 1, 10\) = 0/)
+  assert.match(paymentMigration,/order by level_position[\s\S]*for update[\s\S]*limit 1/)
+  assert.match(paymentMigration,/welfrise_valid_referrer\(p_participant\)/)
+  assert.match(paymentMigration,/Global Charity Fund/)
+  assert.match(paymentMigration,/v_fee := round\(p_gross_amount \* 0\.05, 2\)/)
+  assert.match(paymentMigration,/championship_status = 'completed'/)
 })

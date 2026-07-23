@@ -19,7 +19,7 @@ export async function GET() {
     supabase.from('wallet_payment_requests').select('id,participant_id,payer_id,participant_display,payer_display,amount,slots,level_id,championship_cycle,status,expires_at,created_at').eq('payer_id', user.id).order('created_at', { ascending: false }).limit(20),
     supabase.from('wallet_payment_requests').select('id,participant_id,payer_id,participant_display,payer_display,amount,slots,level_id,championship_cycle,status,expires_at,created_at').eq('participant_id', user.id).order('created_at', { ascending: false }).limit(20),
     supabase.from('participation_slots').select('id,level_id,championship_cycle,level_position,status,payout_amount,created_at,completed_at,payment_method').eq('participant_id', user.id).order('created_at', { ascending: false }).limit(50),
-    supabase.from('notifications').select('id,title,message,notification_type,is_read,created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
+    supabase.from('notifications').select('id,title,message,notification_type,reference_type,reference_id,is_read,created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
     supabase.from('withdrawals').select('id,gross_amount,fee_amount,net_amount,wallet_address,status,created_at,payout_tx_hash').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
   ])
 

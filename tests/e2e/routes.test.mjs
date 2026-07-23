@@ -19,6 +19,9 @@ const paymentDashboardRoute = fs.readFileSync('src/app/api/payments/dashboard/ro
 const adminPage = fs.readFileSync('src/app/admin/page.tsx','utf8')
 const memberDashboard = fs.readFileSync('src/app/app/page.tsx','utf8')
 const paymentMigration = fs.readFileSync('supabase/migrations/20260723_002_payment_wallet_engine.sql','utf8')
+const loginPage = fs.readFileSync('src/app/login/page.tsx','utf8')
+const resetPasswordPage = fs.readFileSync('src/app/reset-password/page.tsx','utf8')
+const passwordRecoverySource = fs.readFileSync('src/lib/password-recovery.ts','utf8')
 
 function sourceFile(file, source = fs.readFileSync(file,'utf8')) {
   return ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
@@ -95,6 +98,11 @@ async function loadAdminActionHarness() {
 
 async function loadPaymentPackageHarness() {
   const javascript = ts.transpileModule(paymentPackageSource,{ compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+  return import(dataModule(javascript))
+}
+
+async function loadPasswordRecoveryHarness() {
+  const javascript = ts.transpileModule(passwordRecoverySource,{ compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
   return import(dataModule(javascript))
 }
 
@@ -458,4 +466,76 @@ test('payment 22/22: locked financial, referral, FIFO, payout, and championship 
   assert.match(paymentMigration,/Global Charity Fund/)
   assert.match(paymentMigration,/v_fee := round\(p_gross_amount \* 0\.05, 2\)/)
   assert.match(paymentMigration,/championship_status = 'completed'/)
+})
+
+test('password recovery targets the public /reset-password production route', () => {
+  assert.match(loginPage,/supabase\.auth\.resetPasswordForEmail\(recoveryEmail\.trim\(\)\.toLowerCase\(\), \{/)
+  assert.match(loginPage,/redirectTo: `\$\{window\.location\.origin\}\/reset-password`/)
+  assert.match(resetPasswordPage,/export default function ResetPasswordPage/)
+})
+
+test('password recovery request always uses neutral anti-enumeration copy', () => {
+  const neutral = 'If an account exists for this email, a password-reset link has been sent.'
+  assert.match(loginPage,new RegExp(neutral.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')))
+  assert.match(loginPage,/catch \{[\s\S]*response remains deliberately neutral[\s\S]*finally \{[\s\S]*setRecoveryMessage\(RECOVERY_REQUEST_MESSAGE\)/)
+  assert.doesNotMatch(loginPage,/resetPasswordForEmail[\s\S]*error\.message/)
+})
+
+test('valid PASSWORD_RECOVERY session unlocks the reset form', () => {
+  assert.match(resetPasswordPage,/onAuthStateChange\(\(event, session\) => \{/)
+  assert.match(resetPasswordPage,/event !== 'PASSWORD_RECOVERY'/)
+  assert.match(resetPasswordPage,/if \(!session\)[\s\S]*setRecoveryState\('invalid'\)/)
+  assert.match(resetPasswordPage,/setRecoveryState\('ready'\)/)
+  assert.match(resetPasswordPage,/Verifying recovery link…/)
+})
+
+test('invalid expired used and missing recovery links show fixed inline errors', async () => {
+  const recovery = await loadPasswordRecoveryHarness()
+  assert.equal(recovery.hasRecoveryLinkParameters('https://welfrise.example/reset-password?error_code=otp_expired'),true)
+  assert.equal(recovery.hasRecoveryLinkParameters('https://welfrise.example/reset-password'),false)
+  assert.match(recovery.INVALID_RECOVERY_LINK_MESSAGE,/invalid, expired, or has already been used/)
+  assert.match(recovery.MISSING_RECOVERY_LINK_MESSAGE,/No password recovery link was found/)
+  assert.match(resetPasswordPage,/className="notice error" role="alert"/)
+  assert.doesNotMatch(resetPasswordPage,/error\.message|console\.|stack/)
+})
+
+test('new recovery password requires at least 12 characters', async () => {
+  const recovery = await loadPasswordRecoveryHarness()
+  assert.equal(recovery.PASSWORD_MIN_LENGTH,12)
+  assert.equal(recovery.validateRecoveryPasswords('short','short'),'Password must be at least 12 characters.')
+  assert.match(resetPasswordPage,/minLength=\{PASSWORD_MIN_LENGTH\}/)
+})
+
+test('password confirmation mismatch is rejected inline before update', async () => {
+  const recovery = await loadPasswordRecoveryHarness()
+  assert.equal(recovery.validateRecoveryPasswords('abcdefghijkl','abcdefghijkm'),'Passwords do not match.')
+  assert.match(resetPasswordPage,/const validationError = validateRecoveryPasswords\(password, confirmation\)/)
+  assert.match(resetPasswordPage,/if \(validationError\) \{[\s\S]*setFieldError\(validationError\)[\s\S]*return/)
+})
+
+test('successful recovery updates the authenticated user password', () => {
+  assert.match(resetPasswordPage,/await supabase\.auth\.updateUser\(\{ password \}\)/)
+  assert.match(resetPasswordPage,/if \(error\) \{[\s\S]*setFieldError\(INVALID_RECOVERY_LINK_MESSAGE\)[\s\S]*return/)
+  assert.match(resetPasswordPage,/setRecoveryState\('success'\)/)
+})
+
+test('recovery credentials and URL fragments are removed from browser history', async () => {
+  const recovery = await loadPasswordRecoveryHarness()
+  assert.equal(recovery.hasRecoveryLinkParameters('https://welfrise.example/reset-password#access_token=secret&refresh_token=secret&type=recovery'),true)
+  assert.match(resetPasswordPage,/window\.history\.replaceState\(null, '', window\.location\.pathname\)/)
+  assert.ok((resetPasswordPage.match(/removeRecoveryCredentialsFromUrl\(\)/g) || []).length >= 4)
+  assert.doesNotMatch(resetPasswordPage,/access_token\}|refresh_token\}|token_hash\}/)
+})
+
+test('successful password recovery signs out locally and returns to login', () => {
+  assert.match(resetPasswordPage,/await supabase\.auth\.signOut\(\{ scope: 'local' \}\)/)
+  assert.match(resetPasswordPage,/<Link className="primary-link recovery-login-link" href="\/login">Return to sign in<\/Link>/)
+  assert.match(resetPasswordPage,/Your password has been updated\. Sign in with your new password\./)
+})
+
+test('password recovery mobile layout is full-width and overflow-safe', () => {
+  assert.match(styles,/\.auth-card \{[\s\S]*min-width: 0;/)
+  assert.match(styles,/\.recovery-card \{ overflow-wrap: anywhere; \}/)
+  assert.match(styles,/@media \(max-width: 480px\) \{[\s\S]*\.shell \{ padding: 14px; \}[\s\S]*\.auth-card \{ width: 100%;/)
+  assert.match(styles,/\.recovery-card input, \.recovery-card button, \.recovery-card a \{ max-width: 100%; \}/)
 })

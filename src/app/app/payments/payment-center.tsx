@@ -92,10 +92,6 @@ async function jsonRequest(url: string, init?: RequestInit) {
   return body
 }
 
-function mutationHeaders(contentType?: string) {
-  return { ...(contentType ? { 'content-type': contentType } : {}), 'idempotency-key': crypto.randomUUID() }
-}
-
 export default function PaymentCenter() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null)
   const [loading, setLoading] = useState(true)
@@ -112,6 +108,18 @@ export default function PaymentCenter() {
   const [withdrawalAmount, setWithdrawalAmount] = useState(10)
   const [withdrawalAddress, setWithdrawalAddress] = useState('')
   const mutationBusyRef = useRef(false)
+  const mutationKeysRef = useRef(new Map<string, string>())
+
+  function mutationHeaders(operation: string, contentType?: string) {
+    const existing = mutationKeysRef.current.get(operation)
+    const idempotencyKey = existing || crypto.randomUUID()
+    if (!existing) mutationKeysRef.current.set(operation, idempotencyKey)
+    return { ...(contentType ? { 'content-type': contentType } : {}), 'idempotency-key': idempotencyKey }
+  }
+
+  function clearMutationKey(operation: string) {
+    mutationKeysRef.current.delete(operation)
+  }
 
   const totalAmount = slotCount * SLOT_PRICE_USD
 
@@ -155,19 +163,24 @@ export default function PaymentCenter() {
     mutationBusyRef.current = true
     resetNotice()
     setBusy('create')
+    const operation = method === 'binance'
+      ? `binance-request:${level}:${slotCount}`
+      : `wallet-request:${payerIdentifier.trim().toLowerCase()}:${level}:${slotCount}`
     try {
       if (method === 'binance') {
         const result = await jsonRequest('/api/payments/binance/request', {
-          method: 'POST', headers: mutationHeaders('application/json'),
+          method: 'POST', headers: mutationHeaders(operation, 'application/json'),
           body: JSON.stringify({ slots: slotCount, level }),
         })
+        clearMutationKey(operation)
         setAssigned(result.payment)
         setMessage(`Payment request created. Level: ${level}. Slots: ${slotCount}. Amount: ${money(totalAmount)}.`)
       } else {
         const result = await jsonRequest('/api/payments/user-wallet', {
-          method: 'POST', headers: mutationHeaders('application/json'),
+          method: 'POST', headers: mutationHeaders(operation, 'application/json'),
           body: JSON.stringify({ payerIdentifier, slots: slotCount, level }),
         })
+        clearMutationKey(operation)
         setMessage(`Authorization request sent to ${result.request?.payer_display || 'the wallet owner'}. Level: ${level}. Slots: ${slotCount}. Amount: ${money(totalAmount)}.`)
         setPayerIdentifier('')
         await load()
@@ -186,12 +199,14 @@ export default function PaymentCenter() {
     mutationBusyRef.current = true
     resetNotice()
     setBusy('proof')
+    const operation = `binance-proof:${assigned.request_id}:${txHash.trim().toLowerCase()}`
     try {
       const form = new FormData()
       form.set('requestId', assigned.request_id)
       form.set('txHash', txHash)
       form.set('proof', proof)
-      await jsonRequest('/api/payments/binance/submit', { method: 'POST', headers: mutationHeaders(), body: form })
+      await jsonRequest('/api/payments/binance/submit', { method: 'POST', headers: mutationHeaders(operation), body: form })
+      clearMutationKey(operation)
       setMessage(`Payment proof submitted. Level: ${assigned.level_id}. Slots: ${assigned.slots}. Amount: ${money(assigned.amount)}.`)
       setAssigned(null)
       setTxHash('')
@@ -216,11 +231,13 @@ export default function PaymentCenter() {
     mutationBusyRef.current = true
     resetNotice()
     setBusy(requestId + action)
+    const operation = `wallet-response:${requestId}:${action}`
     try {
       const result = await jsonRequest('/api/payments/user-wallet', {
-        method: 'PATCH', headers: mutationHeaders('application/json'),
+        method: 'PATCH', headers: mutationHeaders(operation, 'application/json'),
         body: JSON.stringify({ requestId, action }),
       })
+      clearMutationKey(operation)
       setMessage(`Request ${String(result.status).replaceAll('_', ' ')}.${paymentContext}`)
       await load()
     } catch (err) {
@@ -238,11 +255,13 @@ export default function PaymentCenter() {
     mutationBusyRef.current = true
     resetNotice()
     setBusy('withdrawal')
+    const operation = `withdrawal:${withdrawalAmount}:${withdrawalAddress.trim().toLowerCase()}`
     try {
       const result = await jsonRequest('/api/withdrawals', {
-        method: 'POST', headers: mutationHeaders('application/json'),
+        method: 'POST', headers: mutationHeaders(operation, 'application/json'),
         body: JSON.stringify({ grossAmount: withdrawalAmount, walletAddress: withdrawalAddress }),
       })
+      clearMutationKey(operation)
       setMessage(`Withdrawal submitted: ${money(result.withdrawal?.gross_amount)} gross, ${money(result.withdrawal?.fee_amount)} fee, ${money(result.withdrawal?.net_amount)} net.`)
       setWithdrawalAddress('')
       await load()
@@ -354,8 +373,8 @@ export default function PaymentCenter() {
         <div className="copy-row"><code>{assigned.wallet_address}</code><button type="button" onClick={() => void navigator.clipboard.writeText(assigned.wallet_address)}>Copy</button></div>
         <p className="small-muted">Expires: {formatDate(assigned.expires_at)}. The assigned address will not change during this request.</p>
         <form className="form-grid single-column" onSubmit={submitBinanceProof}>
-          <label>Transaction hash<input value={txHash} disabled={Boolean(busy)} onChange={(event) => setTxHash(event.target.value)} minLength={10} required /></label>
-          <label>Payment proof<input type="file" disabled={Boolean(busy)} accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => setProof(event.target.files?.[0] || null)} required /></label>
+          <label>Transaction hash<input value={txHash} disabled={Boolean(busy)} onChange={(event) => setTxHash(event.target.value)} pattern="^0x[a-fA-F0-9]{64}$" title="Enter a 0x-prefixed 66-character transaction hash." required /></label>
+          <label>Payment proof<input type="file" disabled={Boolean(busy)} accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => setProof(event.target.files?.[0] || null)} required /><span className="small-muted">JPG, PNG, WebP, or PDF up to 4 MB.</span></label>
           <button className="primary-button" disabled={Boolean(busy)}>{busy === 'proof' ? 'Submitting…' : 'Submit payment proof'}</button>
         </form>
       </section> : null}

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { validatePrivateDocument } from '@/lib/file-validation'
+import { assertKycSubmissionSize, validatePrivateDocument } from '@/lib/file-validation'
 import { mapSafeError } from '@/lib/safe-errors'
 import { enforceRateLimit, requestActorKey } from '@/lib/rate-limit'
 
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     const idDocument = await validatePrivateDocument(form.get('idDocument'), 'ID document')
     const selfie = await validatePrivateDocument(form.get('selfie'), 'Selfie')
     const addressDocument = await validatePrivateDocument(form.get('addressDocument'), 'Address document')
+    assertKycSubmissionSize([idDocument.file, selfie.file, addressDocument.file])
     const submissionId = existing?.id || crypto.randomUUID()
     const uploadId = crypto.randomUUID()
 

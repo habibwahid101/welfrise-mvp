@@ -22,6 +22,9 @@ const paymentMigration = fs.readFileSync('supabase/migrations/20260723_002_payme
 const loginPage = fs.readFileSync('src/app/login/page.tsx','utf8')
 const resetPasswordPage = fs.readFileSync('src/app/reset-password/page.tsx','utf8')
 const passwordRecoverySource = fs.readFileSync('src/lib/password-recovery.ts','utf8')
+const fileValidationSource = fs.readFileSync('src/lib/file-validation.ts','utf8')
+const kycRoute = fs.readFileSync('src/app/api/kyc/route.ts','utf8')
+const binanceProofRoute = fs.readFileSync('src/app/api/payments/binance/submit/route.ts','utf8')
 
 function sourceFile(file, source = fs.readFileSync(file,'utf8')) {
   return ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
@@ -205,7 +208,7 @@ test('KYC upload exposes actual XHR progress and honest accessible stages', () =
 
 test('KYC file and upload failures remain readable inline alerts', () => {
   assert.match(kycForm,/unsupported file format/)
-  assert.match(kycForm,/file exceeds the 5 MB limit/)
+  assert.match(kycForm,/file exceeds the 4 MB limit/)
   assert.match(kycForm,/role="alert"/)
   assert.doesNotMatch(kycForm,/error instanceof Error \? error\.message/)
 })
@@ -538,4 +541,30 @@ test('password recovery mobile layout is full-width and overflow-safe', () => {
   assert.match(styles,/\.recovery-card \{ overflow-wrap: anywhere; \}/)
   assert.match(styles,/@media \(max-width: 480px\) \{[\s\S]*\.shell \{ padding: 14px; \}[\s\S]*\.auth-card \{ width: 100%;/)
   assert.match(styles,/\.recovery-card input, \.recovery-card button, \.recovery-card a \{ max-width: 100%; \}/)
+})
+
+test('private uploads remain below the Vercel Function request ceiling', () => {
+  assert.match(fileValidationSource,/MAX_PRIVATE_DOCUMENT_BYTES = 4_000_000/)
+  assert.match(fileValidationSource,/MAX_KYC_SUBMISSION_BYTES = 4_000_000/)
+  assert.match(kycRoute,/assertKycSubmissionSize/)
+  assert.match(kycForm,/MAX_KYC_SUBMISSION_BYTES = 4_000_000/)
+  assert.match(kycForm,/selectedBytes > MAX_KYC_SUBMISSION_BYTES/)
+})
+
+test('Binance proof submissions require a canonical EVM transaction hash', () => {
+  assert.match(binanceProofRoute,/\^0x\[0-9a-fA-F\]\{64\}\$/)
+  assert.match(paymentCenter,/pattern="\^0x\[a-fA-F0-9\]\{64\}\$"/)
+})
+
+test('an expired proof submission is cleaned up and returned as a conflict', () => {
+  assert.match(binanceProofRoute,/if \(data === 'expired'\)/)
+  assert.match(binanceProofRoute,/remove\(\[proofPath\]\)/)
+  assert.match(binanceProofRoute,/status: 409/)
+})
+
+test('payment mutation idempotency keys survive a same-page retry', () => {
+  assert.match(paymentCenter,/const mutationKeysRef = useRef\(new Map<string, string>\(\)\)/)
+  assert.match(paymentCenter,/function mutationHeaders\(operation: string/)
+  assert.match(paymentCenter,/mutationKeysRef\.current\.get\(operation\)/)
+  assert.match(paymentCenter,/function clearMutationKey\(operation: string\)/)
 })

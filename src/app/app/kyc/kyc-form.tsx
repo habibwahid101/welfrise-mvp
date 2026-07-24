@@ -14,7 +14,8 @@ type DocumentDefinition = {
   acceptedTypes: string[]
 }
 
-const MAX_FILE_BYTES = 5_000_000
+const MAX_FILE_BYTES = 4_000_000
+const MAX_KYC_SUBMISSION_BYTES = 4_000_000
 const EMPTY_FILES: SelectedFiles = { idDocument: null, selfie: null, addressDocument: null }
 const DOCUMENTS: DocumentDefinition[] = [
   {
@@ -121,7 +122,7 @@ export default function KycForm({ canSubmit, initialStatus }: { canSubmit: boole
     if (file && file.size > MAX_FILE_BYTES) {
       inputElement.value = ''
       setFiles((current) => ({ ...current, [document.key]: null }))
-      setErrorMessage(`${document.label}: file exceeds the 5 MB limit.`)
+      setErrorMessage(`${document.label}: file exceeds the 4 MB limit.`)
       return
     }
 
@@ -144,6 +145,13 @@ export default function KycForm({ canSubmit, initialStatus }: { canSubmit: boole
       for (const document of DOCUMENTS) {
         const file = formData.get(document.key)
         if (!(file instanceof File) || file.size < 1) throw new KycUploadError(`${document.label}: select a file before submitting.`)
+      }
+      const selectedBytes = DOCUMENTS.reduce((total, document) => {
+        const file = formData.get(document.key)
+        return total + (file instanceof File ? file.size : 0)
+      }, 0)
+      if (selectedBytes > MAX_KYC_SUBMISSION_BYTES) {
+        throw new KycUploadError('KYC documents exceed the 4 MB total limit. Choose smaller files and try again.')
       }
 
       await uploadDocuments(formData, {
@@ -198,7 +206,7 @@ export default function KycForm({ canSubmit, initialStatus }: { canSubmit: boole
   return (
     <form className="form kyc-form" onSubmit={submit}>
       <p className="kyc-current-status">Status: <strong>{initialStatus}</strong></p>
-      <p className="small-muted">JPG, PNG, WebP, or PDF only. Maximum 5 MB per document. Files are stored privately and are not previewed here.</p>
+      <p className="small-muted">JPG, PNG, WebP, or PDF only. Maximum 4 MB total. Files are stored privately and are not previewed here.</p>
       <div className="kyc-upload-grid">
         {DOCUMENTS.map((document) => {
           const file = files[document.key]

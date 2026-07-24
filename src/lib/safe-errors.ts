@@ -20,7 +20,7 @@ const knownErrors: Array<[RegExp, string, number]> = [
   [/temporarily unavailable|receiving wallet.*unavailable/i, 'Binance payment is temporarily unavailable. Please try again later or use Pay by User Wallet.', 503],
   [/duplicate.*transaction|transaction.*unique|tx_hash.*unique/i, 'That transaction hash has already been used.', 409],
   [/invalid transaction|invalid payment proof|proof.*required|proof must/i, 'Provide a valid transaction hash and payment proof.', 400],
-  [/file is required|document is required|selfie is required|no larger than 5 mb|must be jpg|content does not match/i, 'Use a supported JPG, PNG, WebP, or PDF file no larger than 5 MB.', 400],
+  [/file is required|document is required|selfie is required|no larger than 4 mb|exceed.*4 mb|must be jpg|content does not match/i, 'Use supported JPG, PNG, WebP, or PDF files no larger than 4 MB in total.', 400],
   [/kyc submission is already|already under review/i, 'A KYC submission is already under review or approved.', 409],
   [/invalid status|invalid decision/i, 'Select a valid review decision.', 400],
   [/invalid adjustment|audit reason/i, 'Enter a valid adjustment and a clear audit reason.', 400],

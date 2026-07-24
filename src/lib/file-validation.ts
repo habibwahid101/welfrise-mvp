@@ -1,4 +1,5 @@
-export const MAX_PRIVATE_DOCUMENT_BYTES = 5_000_000
+export const MAX_PRIVATE_DOCUMENT_BYTES = 4_000_000
+export const MAX_KYC_SUBMISSION_BYTES = 4_000_000
 
 const mimeExtensions: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -13,7 +14,7 @@ function startsWith(bytes: Uint8Array, signature: number[]) {
 
 export async function validatePrivateDocument(value: FormDataEntryValue | null, label: string) {
   if (!(value instanceof File) || value.size < 1) throw new Error(`${label} is required.`)
-  if (value.size > MAX_PRIVATE_DOCUMENT_BYTES) throw new Error(`${label} must be no larger than 5 MB.`)
+  if (value.size > MAX_PRIVATE_DOCUMENT_BYTES) throw new Error(`${label} must be no larger than 4 MB.`)
   const extension = mimeExtensions[value.type]
   if (!extension) throw new Error(`${label} must be JPG, PNG, WebP, or PDF.`)
 
@@ -28,4 +29,11 @@ export async function validatePrivateDocument(value: FormDataEntryValue | null, 
 
   if (!valid) throw new Error(`${label} content does not match its file type.`)
   return { file: value, extension }
+}
+
+export function assertKycSubmissionSize(files: File[]) {
+  const submissionBytes = files.reduce((total, file) => total + file.size, 0)
+  if (submissionBytes > MAX_KYC_SUBMISSION_BYTES) {
+    throw new Error('KYC documents must be no larger than 4 MB in total.')
+  }
 }

@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const requestId = String(form.get('requestId') || '').trim()
     const txHash = String(form.get('txHash') || '').trim()
     if (!/^[0-9a-fA-F-]{36}$/.test(requestId)) throw new Error('Invalid payment proof request')
-    if (txHash.length < 10 || txHash.length > 180) throw new Error('Invalid transaction hash')
+    if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error('Invalid transaction hash')
     const proof = await validatePrivateDocument(form.get('proof'), 'Payment proof')
     const idempotencyKey = request.headers.get('idempotency-key') || crypto.randomUUID()
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(idempotencyKey)) throw new Error('Invalid payment proof request')
@@ -32,6 +32,13 @@ export async function POST(request: Request) {
       p_idempotency_key: idempotencyKey,
     })
     if (error) throw error
+    if (data === 'expired') {
+      if (proofPath && uploadedNew) await supabase.storage.from('welfrise-private').remove([proofPath])
+      return NextResponse.json(
+        { error: 'This payment request has expired. Create a new request and try again.' },
+        { status: 409 },
+      )
+    }
     return NextResponse.json({ ok: true, status: data })
   } catch (error) {
     if (proofPath && uploadedNew) await supabase.storage.from('welfrise-private').remove([proofPath])

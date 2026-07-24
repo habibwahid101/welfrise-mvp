@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { PasswordInput } from '@/components/password-input'
 
 const RECOVERY_REQUEST_MESSAGE = 'If an account exists for this email, a password-reset link has been sent.'
 
@@ -72,7 +73,7 @@ export default function LoginPage() {
           </div>
           <div className="field">
             <label htmlFor="password">Password</label>
-            <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+            <PasswordInput id="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
           </div>
           <div className="forgot-password-row"><button className="link-button" type="button" aria-expanded={recoveryOpen} onClick={() => { setRecoveryOpen((current) => !current); setRecoveryEmail((current) => current || email); setRecoveryMessage('') }}>Forgot password?</button></div>
           {message ? <div className="notice error" role="alert" aria-live="polite">{message}</div> : null}

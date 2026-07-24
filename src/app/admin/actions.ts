@@ -129,3 +129,34 @@ export async function updateKycStatus(_previous: ActionResult, formData: FormDat
     if (error) throw error
   })
 }
+
+export async function createPilotInvitation(_previous: ActionResult, formData: FormData): Promise<ActionResult> {
+  try {
+    const { supabase } = await requireAdminAal2()
+    const expiresAt = value(formData, 'expiresAt')
+    if (!expiresAt || Number.isNaN(Date.parse(expiresAt))) return { success: false, message: 'Choose a valid expiry date and time.' }
+    const { data, error } = await supabase.rpc('admin_create_pilot_invitation_v1', {
+      p_email: value(formData, 'email') || null,
+      p_expires_at: new Date(expiresAt).toISOString(),
+      p_idempotency_key: idempotency(formData),
+    })
+    if (error) throw error
+    const invitationCode = Array.isArray(data) ? data[0]?.invitation_code : null
+    revalidatePath('/admin')
+    return invitationCode
+      ? { success: true, message: 'Invitation created. Copy this code now; it will not be shown again.', invitationCode }
+      : { success: true, message: 'This invitation request was already processed. Its code cannot be displayed again.' }
+  } catch (error) {
+    return { success: false, message: errorMessage(error, 'admin.invitation.create') }
+  }
+}
+
+export async function revokePilotInvitation(_previous: ActionResult, formData: FormData): Promise<ActionResult> {
+  return execute('admin.invitation.revoke', async () => {
+    const { supabase } = await requireAdminAal2()
+    const { error } = await supabase.rpc('admin_revoke_pilot_invitation_v1', {
+      p_invitation_id: value(formData, 'id'), p_idempotency_key: idempotency(formData),
+    })
+    if (error) throw error
+  })
+}

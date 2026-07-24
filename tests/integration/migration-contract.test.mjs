@@ -10,6 +10,7 @@ const authorizationHardeningPath = 'supabase/migrations/20260724_006_authorizati
 const authorizationHardening = fs.existsSync(authorizationHardeningPath)
   ? fs.readFileSync(authorizationHardeningPath,'utf8')
   : ''
+const invitationManagement = fs.readFileSync('supabase/migrations/20260724_007_pilot_invitation_management.sql','utf8')
 
 test('fresh user creation uses pgcrypto in extensions schema', () => { assert.match(sql,/extensions\.gen_random_bytes/); assert.match(sql,/set search_path = public, extensions, pg_temp/) })
 test('invalid receiving wallet is rejected without relying on UI', () => assert.match(sql,/\^0x\[0-9a-fA-F\]\{40\}\$/))
@@ -22,6 +23,13 @@ test('KYC paths are bound to authenticated user and submission', () => assert.ma
 test('ledger and audit history cannot be rewritten', () => { for (const table of ['wallet_ledger','financial_ledger','payout_events','admin_audit_log']) assert.match(sql,new RegExp(table)) ; assert.match(sql,/Historical records are append-only/) })
 test('profile championship schema drift repair is idempotent', () => { for (const column of ['championship_cycle','championship_status','championship_completed_at']) assert.match(driftRepair,new RegExp(column)); assert.match(driftRepair,/add column if not exists/) })
 test('Treasury view payout helper execution is restored for authenticated users', () => { assert.match(treasuryPrivilegeRepair,/welfrise_payout_for_level\(integer\)/); assert.match(treasuryPrivilegeRepair,/grant execute/); assert.match(treasuryPrivilegeRepair,/authenticated/) })
+test('Migration 007 stores hashed one-time invitation codes and enforces AAL2 audited idempotent mutations', () => {
+  assert.match(invitationManagement,/extensions\.crypt\(v_code,extensions\.gen_salt/)
+  assert.match(invitationManagement,/welfrise_require_admin_aal2\(\)/)
+  assert.match(invitationManagement,/pilot_invitation_create[\s\S]+p_idempotency_key/)
+  assert.match(invitationManagement,/pilot_invitation_created[\s\S]+admin_audit_log/)
+  assert.match(invitationManagement,/insert into public\.pilot_invitations\(email,code_hash,expires_at,created_by\)/i)
+})
 
 test('the database accepts only the four locked slot packages and derives exact amounts', () => {
   for (const [amount, slots] of [[10,1],[20,2],[50,5],[100,10]]) {

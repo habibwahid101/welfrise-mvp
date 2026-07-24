@@ -235,14 +235,14 @@ test('every top-level use server module exports async functions only', () => {
   for (const file of useServerFiles) assert.deepEqual(invalidUseServerExports(file),[],`${file} contains an invalid runtime export`)
 })
 
-test('Admin Server Actions are import-compatible and expose only the six async actions', () => {
+test('Admin Server Actions are import-compatible and expose only the eight async actions', () => {
   const parsed = sourceFile(adminActionsPath,adminActions)
   const exportedAsyncFunctions = parsed.statements
     .filter((statement) => ts.isFunctionDeclaration(statement) && hasModifier(statement,ts.SyntaxKind.ExportKeyword) && hasModifier(statement,ts.SyntaxKind.AsyncKeyword))
     .map((statement) => statement.name.text)
     .sort()
   assert.deepEqual(exportedAsyncFunctions,[
-    'adjustWalletBalance','createReceivingWallet','reviewBinancePayment','reviewWithdrawal','updateKycStatus','updateReceivingWalletStatus',
+    'adjustWalletBalance','createPilotInvitation','createReceivingWallet','reviewBinancePayment','reviewWithdrawal','revokePilotInvitation','updateKycStatus','updateReceivingWalletStatus',
   ].sort())
   assert.match(adminForms,/from '\.\/actions'/)
   assert.match(adminForms,/initialActionResult, type ActionResult \} from '\.\/action-state'/)

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { PasswordInput } from '@/components/password-input'
 import {
   hasRecoveryLinkParameters,
   INVALID_RECOVERY_LINK_MESSAGE,
@@ -149,12 +150,12 @@ export default function ResetPasswordPage() {
         {recoveryState === 'ready' ? <form className="form" onSubmit={submit}>
           <div className="field">
             <label htmlFor="new-password">New password</label>
-            <input id="new-password" type="password" minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="new-password" disabled={busy} aria-describedby="password-requirements" />
+            <PasswordInput id="new-password" minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="new-password" disabled={busy} aria-describedby="password-requirements" />
             <small id="password-requirements">Use at least 12 characters.</small>
           </div>
           <div className="field">
             <label htmlFor="confirm-password">Confirm password</label>
-            <input id="confirm-password" type="password" minLength={PASSWORD_MIN_LENGTH} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required autoComplete="new-password" disabled={busy} />
+            <PasswordInput id="confirm-password" minLength={PASSWORD_MIN_LENGTH} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required autoComplete="new-password" disabled={busy} />
           </div>
           {fieldError ? <div className="notice error" role="alert" aria-live="assertive">{fieldError}</div> : null}
           <button className="primary-button" disabled={busy}>{busy ? 'Updating password…' : 'Update password'}</button>

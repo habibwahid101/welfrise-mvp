@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { PasswordInput } from '@/components/password-input'
 
 type Factor = { id: string; friendly_name?: string; status: string; factor_type: string }
 type Enrollment = { id: string; qrCode: string; secret: string }
@@ -87,7 +88,7 @@ export default function SecurityCenter({ isAdmin }: { isAdmin: boolean }) {
       </section>
       <section className="portal-panel">
         <h2>Change password</h2>
-        <form className="form" onSubmit={updatePassword}><div className="field"><label htmlFor="newPassword">New password</label><input id="newPassword" type="password" minLength={12} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /><span className="small-muted">Use at least 12 characters.</span></div><button className="primary-button portal-action" disabled={busy === 'password'}>{busy === 'password' ? 'Updating…' : 'Update password'}</button></form>
+        <form className="form" onSubmit={updatePassword}><div className="field"><label htmlFor="newPassword">New password</label><PasswordInput id="newPassword" minLength={12} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /><span className="small-muted">Use at least 12 characters.</span></div><button className="primary-button portal-action" disabled={busy === 'password'}>{busy === 'password' ? 'Updating…' : 'Update password'}</button></form>
       </section>
     </div>
   )

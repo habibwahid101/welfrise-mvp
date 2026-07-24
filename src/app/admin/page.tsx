@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import {
   BinanceReviewForm, KycReviewForm, MaskedValue, ReceivingWalletForm,
   WalletAdjustmentForm, WalletStatusForm, WithdrawalReviewForm,
+  PilotInvitationForm, RevokePilotInvitationForm,
 } from './admin-forms'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +23,7 @@ export default async function AdminPage() {
   const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
   const mutationEnabled = aal?.currentLevel === 'aal2'
 
-  const [walletsResult, binanceResult, userWalletResult, withdrawalsResult, kycResult, accountsResult, treasuryResult] = await Promise.all([
+  const [walletsResult, binanceResult, userWalletResult, withdrawalsResult, kycResult, accountsResult, treasuryResult, invitationsResult] = await Promise.all([
     supabase.from('admin_receiving_wallets').select('*').order('priority').order('created_at').limit(100),
     supabase.from('admin_binance_payment_requests').select('*').order('created_at', { ascending: false }).limit(100),
     supabase.from('wallet_payment_requests').select('id,amount,slots,level_id,status,created_at,participant:profiles!wallet_payment_requests_participant_id_fkey(email,full_name),payer:profiles!wallet_payment_requests_payer_id_fkey(email,full_name)').order('created_at', { ascending: false }).limit(100),
@@ -30,8 +31,9 @@ export default async function AdminPage() {
     supabase.from('kyc_submissions').select('id,user_id,status,submitted_at,id_document_path,selfie_path,address_document_path,review_note,profiles!kyc_submissions_user_id_fkey(email,full_name)').order('submitted_at', { ascending: false }).limit(100),
     supabase.from('wallet_accounts').select('user_id,available_balance,held_balance,updated_at,profiles!wallet_accounts_user_id_fkey(email,full_name,referral_code)').order('updated_at', { ascending: false }).limit(100),
     supabase.from('admin_treasury_exposure').select('*').maybeSingle(),
+    supabase.from('pilot_invitations').select('id,email,expires_at,used_by,used_at,revoked_at,created_at').order('created_at', { ascending: false }).limit(100),
   ])
-  const queryError = walletsResult.error || binanceResult.error || userWalletResult.error || withdrawalsResult.error || kycResult.error || accountsResult.error || treasuryResult.error
+  const queryError = walletsResult.error || binanceResult.error || userWalletResult.error || withdrawalsResult.error || kycResult.error || accountsResult.error || treasuryResult.error || invitationsResult.error
   const wallets = walletsResult.data || []
   const binance = binanceResult.data || []
   const userWalletRequests = userWalletResult.data || []
@@ -39,6 +41,7 @@ export default async function AdminPage() {
   const kyc = kycResult.data || []
   const accounts = accountsResult.data || []
   const treasury = treasuryResult.data as Record<string, unknown> | null
+  const invitations = invitationsResult.data || []
 
   const signedKyc = await Promise.all(kyc.map(async (item) => {
     if (!mutationEnabled) return { ...item, links: [] as string[] }
@@ -54,8 +57,10 @@ export default async function AdminPage() {
   return <main className="admin-page"><div className="admin-wrap">
     <header className="admin-head"><div><p className="eyebrow">Welfrise · Give. Grow. Rise.</p><h1>Closed-pilot administration</h1><p>{me.full_name || user.email}</p></div><nav className="admin-actions"><Link href="/app">Dashboard</Link><Link href="/app/payments">Payments & Wallet</Link><Link href="/account/security">Account Security</Link><Link href="/api/health">System Health</Link></nav></header>
     {!mutationEnabled ? <div className="notice error" role="alert"><strong>Read-only admin view.</strong> Complete MFA verification to continue with financial or KYC changes. <Link href="/account/security">Verify MFA</Link></div> : null}
-    {queryError ? <div className="notice error" role="alert">Some admin data is temporarily unavailable. Confirm migrations 001 through 005 are applied.</div> : null}
+    {queryError ? <div className="notice error" role="alert">Some admin data is temporarily unavailable. Confirm migrations 001 through 007 are applied.</div> : null}
     <section className="admin-grid"><div className="metric"><strong>{signedBinance.filter((item) => ['submitted','held'].includes(item.status)).length}</strong><span>Binance reviews</span></div><div className="metric"><strong>{userWalletRequests.filter((item) => item.status === 'pending').length}</strong><span>Pending wallet authorizations</span></div><div className="metric"><strong>{withdrawals.filter((item) => ['pending','approved','held'].includes(item.status)).length}</strong><span>Active withdrawals</span></div></section>
+
+    <section className="panel"><h2>Pilot invitations</h2><p className="small-muted">Invitation codes are displayed once and stored only as hashes. Creating or revoking requires administrator AAL2.</p><PilotInvitationForm enabled={mutationEnabled} /><div className="table-scroll"><table><thead><tr><th>Email binding</th><th>Status</th><th>Expires</th><th>Used at</th><th>Used by</th><th>Action</th></tr></thead><tbody>{invitations.map((item) => { const status = item.used_at ? 'used' : item.revoked_at ? 'revoked' : new Date(item.expires_at) <= new Date() ? 'expired' : 'active'; return <tr key={item.id}><td>{item.email || 'Any eligible email'}</td><td>{statusBadge(status)}</td><td>{new Date(item.expires_at).toLocaleString()}</td><td>{item.used_at ? new Date(item.used_at).toLocaleString() : '—'}</td><td>{item.used_by || '—'}</td><td>{status === 'active' ? <RevokePilotInvitationForm id={item.id} enabled={mutationEnabled} /> : '—'}</td></tr> })}</tbody></table></div></section>
 
     <section className="panel"><h2>Treasury exposure</h2><p className="treasury-warning">Closed-pilot financial exposure only. This does not confirm funding sufficiency or authorize public launch.</p><div className="treasury-grid"><div><span>Confirmed participation receipts</span><strong>{money(treasury?.total_confirmed_participation_receipts)}</strong></div><div><span>Charity allocations</span><strong>{money(treasury?.charity_allocations)}</strong></div><div><span>Referral commissions</span><strong>{money(treasury?.referral_commissions)}</strong></div><div><span>Level Bonus Reserve</span><strong>{money(treasury?.level_bonus_reserve_allocations)}</strong></div><div><span>Operations allocations</span><strong>{money(treasury?.operations_allocations)}</strong></div><div><span>Available-wallet liabilities</span><strong>{money(treasury?.available_wallet_liabilities)}</strong></div><div><span>Held-wallet liabilities</span><strong>{money(treasury?.held_wallet_liabilities)}</strong></div><div><span>Completed payout liabilities</span><strong>{money(treasury?.completed_payout_liabilities)}</strong></div><div><span>Reserve coverage ratio</span><strong>{Number(treasury?.reserve_coverage_ratio || 0).toFixed(4)}</strong></div></div>{treasury?.reserve_below_payout_liability ? <div className="notice error" role="alert">Recorded Level Bonus Reserve is below completed payout liability.</div> : null}<p className="small-muted">Waiting-slot exposure by level: <code>{JSON.stringify(treasury?.waiting_slot_exposure_by_level || {})}</code></p></section>
 

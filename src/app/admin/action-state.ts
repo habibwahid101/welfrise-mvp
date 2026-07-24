@@ -3,6 +3,7 @@ export type ActionResult = {
   message: string
   fieldErrors?: Record<string, string>
   correlationId?: string
+  invitationCode?: string
 }
 
 export const initialActionResult: ActionResult = {

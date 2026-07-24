@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom'
 import {
   adjustWalletBalance, createReceivingWallet, reviewBinancePayment,
   reviewWithdrawal, updateKycStatus, updateReceivingWalletStatus,
+  createPilotInvitation, revokePilotInvitation,
 } from './actions'
 import { initialActionResult, type ActionResult } from './action-state'
 
@@ -42,6 +43,25 @@ export function ReceivingWalletForm({ enabled }: { enabled: boolean }) {
   const [state, action] = useActionState(createReceivingWallet, initialActionResult)
   const { keyRef, prepare } = useIdempotencyKey(state)
   return <form action={action} className="admin-form-row" onSubmit={prepare}><Key inputRef={keyRef} /><label>Internal label<input name="internalLabel" required minLength={2} maxLength={80} /></label><label>BEP20 address<input name="walletAddress" required pattern="^0x[0-9a-fA-F]{40}$" /></label><label>Capacity<input name="capacityLimit" type="number" min="0.01" step="0.01" defaultValue="10000" required /></label><label>Priority<input name="priority" type="number" min="1" step="1" defaultValue="100" required /></label><Submit disabled={!enabled}>Add wallet</Submit><Notice state={state} /></form>
+}
+
+export function PilotInvitationForm({ enabled }: { enabled: boolean }) {
+  const [state, action] = useActionState(createPilotInvitation, initialActionResult)
+  const { keyRef, prepare } = useIdempotencyKey(state)
+  return <form action={action} className="admin-form-row invitation-form" onSubmit={prepare}>
+    <Key inputRef={keyRef} />
+    <label>Email binding (optional)<input name="email" type="email" autoComplete="off" /></label>
+    <label>Expires at<input name="expiresAt" type="datetime-local" required /></label>
+    <Submit disabled={!enabled}>Create invitation</Submit>
+    <Notice state={state} />
+    {state.invitationCode ? <div className="invitation-once" role="status" aria-live="polite"><strong>Copy once:</strong> <code>{state.invitationCode}</code><button type="button" onClick={() => void navigator.clipboard.writeText(state.invitationCode || '')}>Copy</button></div> : null}
+  </form>
+}
+
+export function RevokePilotInvitationForm({ id, enabled }: { id: string; enabled: boolean }) {
+  const [state, action] = useActionState(revokePilotInvitation, initialActionResult)
+  const { keyRef, prepare } = useIdempotencyKey(state)
+  return <form action={action} className="inline-admin-form" onSubmit={prepare}><Key inputRef={keyRef} /><input type="hidden" name="id" value={id} /><Submit danger disabled={!enabled} confirmText="Revoke this unused invitation?">Revoke</Submit><Notice state={state} /></form>
 }
 
 export function WalletStatusForm({ id, current, enabled }: { id: string; current: string; enabled: boolean }) {

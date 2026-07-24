@@ -4,13 +4,14 @@ Prepared: 2026-07-24
 Matrix: `docs/WELFRISE_COMPLETE_QA_TEST_MATRIX_v1.0.md`
 Audited baseline: `484f12e1b4f6751932dc36ab28bd0edac2d8221e`
 Fix commits under test: `9604bd3551fcdd6b652f01518da5c62b290d3d28`, `8fbd96edbad5b37d5f48249a8be65eed7f1b3722`
+Controlled QA Closure baseline: `705fd72fc22126ef0289aaff53a0f9d69bf21dad`
 
 ## Overall result
 
-**PASS WITH CONDITIONS for closed-pilot continuation.**
+**NO-GO at the controlled QA Closure gate for further closed-pilot financial, payment, KYC, withdrawal, or admin mutation activity.**
 **NO-GO for public real-money launch.**
 
-The application builds and all executable local suites pass. Anonymous production behavior is healthy. Core database, signed-in, concurrency, RLS, treasury, and payment-transition scenarios were not executed because no disposable Supabase/PostgreSQL environment or existing authenticated QA session was available. The unresolved independent on-chain verification assurance is High severity for public real-money operation.
+The earlier application, contract, and anonymous production evidence remains valid, but it does not close the database gate. A repeated capability check found no Supabase CLI, Docker-compatible runtime, PostgreSQL client, database/Supabase credentials, isolated QA project, or authenticated production session. The available production browser redirected `/app` to `/login`. Therefore Migration 006 rehearsal/application, functional database/RLS/RPC/Storage/rollback/concurrency execution, and the production Treasury read were not performed. No source-contract check was converted into a functional pass.
 
 ## Matrix counts
 
@@ -23,6 +24,36 @@ The application builds and all executable local suites pass. Anonymous productio
 | Not safely testable | 0 |
 
 Classification is deliberately strict. A row containing `DB-ISO` or `SESSION` is blocked unless its complete expected result was independently evidenced. Source contracts do not convert a database execution case into a pass. The one failure is M-015 (small public-page touch targets); it is non-blocking and recorded for the UI/UX audit. Scenarios involving real funds were designed for disposable fixtures, so they are blocked rather than counted as unsafe production tests.
+
+Counts are unchanged after the closure attempt because no new functional evidence was available.
+
+## Controlled QA Closure evidence
+
+| Closure requirement | Result | Evidence |
+|---|---|---|
+| Exact Migration 006 rehearsal/application procedure | PREPARED | `docs/WELFRISE_MIGRATION_006_QA_CLOSURE_RUNBOOK_v1.0.md` |
+| Canonical duplicate payout-hash preflight | BLOCKED | Exact read-only `lower(btrim(payout_tx_hash))` query prepared; no production database access |
+| Migrations 001–006 isolated rehearsal | BLOCKED | No Supabase CLI, Docker-compatible runtime, database credential, or QA project |
+| Database/RLS/RPC/Storage execution | BLOCKED | No isolated project or role-specific authenticated sessions |
+| Rollback and concurrency execution | BLOCKED | No disposable database or two independent authenticated clients/sessions |
+| Production Migration 006 application | NOT ATTEMPTED | Rehearsal acceptance gate not met |
+| Production Treasury baseline | BLOCKED | No authenticated production admin AAL2 session |
+
+The pending Migration 006 payout-hash unique index now uses the same canonical form required by the preflight: `lower(btrim(payout_tx_hash))`, excluding null or blank values. This is a financial-integrity alignment, not a payout or withdrawal-rule change.
+
+Safe local regression was re-run after the closure artifacts were prepared:
+
+| Validation | Closure result |
+|---|---|
+| MVP invariant verification | PASS — 18/18 |
+| ESLint | PASS |
+| TypeScript | PASS |
+| Unit tests | PASS — 22/22 |
+| Migration/source contracts | PASS — 29/29 |
+| Route/component tests | PASS — 57/57 |
+| Next.js production build | PASS — 20 static pages generated |
+
+The initial sandboxed build compiled but Windows denied a worker spawn with `EPERM`; the identical build passed when re-run with the required process permission. This was an execution-environment restriction, not an application or TypeScript failure.
 
 ## Passed matrix IDs
 
@@ -92,17 +123,17 @@ Automated case total: **126 passed, 0 failed** (18 verifier assertions + 22 unit
 
 | Workflow | Status | Evidence and condition |
 |---|---|---|
-| Authentication | PASS WITH CONDITIONS | Public/login/recovery contracts and anonymous production boundary pass; invitation consumption, valid sessions, logout, expiry, and cross-account behavior need isolated/authenticated execution. |
-| Admin MFA | PASS WITH CONDITIONS | UI, Server Action, RPC AAL2, async-export, inline-error, and admin-only-role contracts pass; live AAL1/AAL2 transition is blocked. |
-| KYC | PASS WITH CONDITIONS | File signatures, 4 MB aggregate, progress, inline errors, RPC-only metadata, AAL2 review, and private policy contracts pass; live upload/review/signed URL lifecycle is blocked. |
-| User Wallet | PASS WITH CONDITIONS | Server-derived packages, participant-referrer binding, balance/row-lock/idempotency contracts pass; actual debit/decline/cancel/concurrent settlement is blocked. |
-| Binance | PASS WITH CONDITIONS | Internal selection, capacity lock, canonical hash, expiry, proof cleanup, duplicate hash, and approval checklist contracts pass; independent on-chain verification and DB execution remain blocked. |
-| Financial ledger | PASS WITH CONDITIONS | Exact $10 allocation and append-only/atomic source contracts pass; live reconciliation and rollback execution are blocked. |
-| Referral | PASS WITH CONDITIONS | Registered active referrer and charity fallback contracts pass; transaction execution is blocked. |
-| FIFO | PASS WITH CONDITIONS | Atomic per-level/cycle counter, unique position, thresholds, earliest waiting selection, and payout constants pass source contracts; positions/concurrency execution is blocked. |
-| Level progression | PASS WITH CONDITIONS | Locked-level, unlock-once, Level 5 completion, and paid Level 1 new-cycle contracts pass; live transaction execution is blocked. |
-| Withdrawal | PASS WITH CONDITIONS | KYC gate, 5% fee, daily bounds, exact hold, fail-closed release, and unique payout reference contracts pass; lifecycle/concurrency execution is blocked. |
-| RLS/security | PASS WITH CONDITIONS | Migration 006 closes confirmed role/profile/KYC/private-object bypasses; direct orphan Storage uploads and CSP hardening remain open; live RLS execution is blocked. |
+| Authentication | PARTIAL / FUNCTIONAL BLOCKED | Public/login/recovery contracts and anonymous production boundary pass; invitation consumption, valid sessions, logout, expiry, and cross-account behavior need isolated/authenticated execution. |
+| Admin MFA | CONTRACT PASS / FUNCTIONAL BLOCKED | UI, Server Action, RPC AAL2, async-export, inline-error, and admin-only-role contracts pass; live AAL1/AAL2 transition is blocked. |
+| KYC | CONTRACT PASS / FUNCTIONAL BLOCKED | File signatures, 4 MB aggregate, progress, inline errors, RPC-only metadata, AAL2 review, and private policy contracts pass; live upload/review/signed URL lifecycle is blocked. |
+| User Wallet | CONTRACT PASS / FUNCTIONAL BLOCKED | Server-derived packages, participant-referrer binding, balance/row-lock/idempotency contracts pass; actual debit/decline/cancel/concurrent settlement is blocked. |
+| Binance | CONTRACT PASS / FUNCTIONAL BLOCKED | Internal selection, capacity lock, canonical hash, expiry, proof cleanup, duplicate hash, and approval checklist contracts pass; independent on-chain verification and DB execution remain blocked. |
+| Financial ledger | CONTRACT PASS / FUNCTIONAL BLOCKED | Exact $10 allocation and append-only/atomic source contracts pass; live reconciliation and rollback execution are blocked. |
+| Referral | CONTRACT PASS / FUNCTIONAL BLOCKED | Registered active referrer and charity fallback contracts pass; transaction execution is blocked. |
+| FIFO | CONTRACT PASS / FUNCTIONAL BLOCKED | Atomic per-level/cycle counter, unique position, thresholds, earliest waiting selection, and payout constants pass source contracts; positions/concurrency execution is blocked. |
+| Level progression | CONTRACT PASS / FUNCTIONAL BLOCKED | Locked-level, unlock-once, Level 5 completion, and paid Level 1 new-cycle contracts pass; live transaction execution is blocked. |
+| Withdrawal | CONTRACT PASS / FUNCTIONAL BLOCKED | KYC gate, 5% fee, daily bounds, exact hold, fail-closed release, and canonical unique payout reference contracts pass; lifecycle/concurrency execution is blocked. |
+| RLS/security | CONTRACT PASS / FUNCTIONAL BLOCKED | Migration 006 contains fixes for confirmed role/profile/KYC/private-object bypasses; direct orphan Storage uploads and CSP hardening remain open; Migration 006 is not live and functional RLS execution is blocked. |
 | Deployment | PASS | Final main-branch deployment and health were verified after push; authenticated routes remain unverified due missing session. |
 
 ## Locked-rule regression
@@ -134,18 +165,18 @@ The required baseline values were **not queried** because there was no authentic
 - Level 1 waiting slots 2
 - Nominal payout exposure $40
 
-An authorized owner must re-read and reconcile these values after applying Migration 006 and before any further pilot financial activity.
+An authorized owner must execute the read-only baseline query in `docs/WELFRISE_MIGRATION_006_QA_CLOSURE_RUNBOOK_v1.0.md` after applying Migration 006 and before any further pilot financial activity.
 
 ## Required release actions
 
-1. Apply Migration 006 to a disposable Supabase clone and execute the blocked transaction/RLS/concurrency suite.
-2. Review duplicate existing withdrawal payout hashes before applying the new unique index, then apply Migration 006 to production through the approved migration process.
-3. Verify the production Treasury baseline at AAL2 without changing data.
-4. Document Supabase Auth password-recovery rate limits.
-5. Maintain manual independent on-chain verification for the closed pilot; implement a trusted verifier/dual control before public real-money use.
-6. Provision repeatable non-production fixtures and role-specific authenticated sessions for release QA.
+1. Provision the tooling, isolated Supabase QA project, synthetic fixtures, and role-specific AAL1/AAL2 sessions listed in `docs/WELFRISE_MIGRATION_006_QA_CLOSURE_RUNBOOK_v1.0.md`.
+2. Apply migrations 001–006 to the isolated project and execute the blocked transaction/RLS/RPC/Storage/rollback/concurrency suite.
+3. Run the canonical trimmed, lower-case production duplicate payout-hash preflight, then apply Migration 006 only if it returns zero rows and the rehearsal gate passes.
+4. Verify the production Treasury baseline at AAL2 without changing data.
+5. Document Supabase Auth password-recovery rate limits.
+6. Maintain manual independent on-chain verification for the closed pilot; implement a trusted verifier/dual control before public real-money use.
 
 ## Decision
 
-- **Closed-pilot continuation:** GO WITH CONDITIONS after Migration 006 is rehearsed/applied and the owner verifies the unchanged Treasury baseline. Keep invitation-only scope, authorized operators, MFA, transaction caps, and manual independent chain verification.
+- **Closed-pilot continuation:** NO-GO at this closure gate. Resume financial, payment, KYC, withdrawal, and admin mutation activity only after the runbook passes, Migration 006 is applied and verified, and the owner confirms the unchanged Treasury baseline. Read-only incident-safe access may continue under owner control.
 - **Public real-money launch:** NO-GO. Legal approval, security assurance, independent on-chain verification, treasury funding/payout sustainability, operational readiness, all High findings, and blocked transactional evidence must be independently resolved.

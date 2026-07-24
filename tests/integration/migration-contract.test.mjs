@@ -150,5 +150,6 @@ test('Migration 006 fails closed on inconsistent withdrawal holds and prevents p
   assert.ok(authorizationHardening,`${authorizationHardeningPath} is required`)
   assert.match(authorizationHardening,/held_balance >= v_withdrawal\.gross_amount/)
   assert.match(authorizationHardening,/Withdrawal held balance is inconsistent/)
-  assert.match(authorizationHardening,/unique index if not exists withdrawals_payout_tx_hash_ci_unique[\s\S]+lower\(payout_tx_hash\)/i)
+  assert.match(authorizationHardening,/unique index if not exists withdrawals_payout_tx_hash_ci_unique[\s\S]+lower\(btrim\(payout_tx_hash\)\)/i)
+  assert.match(authorizationHardening,/where nullif\(btrim\(payout_tx_hash\), ''\) is not null/i)
 })

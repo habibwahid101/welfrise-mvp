@@ -1,7 +1,7 @@
 # Welfrise Complete QA Test Matrix v1.0
 
 Prepared: 2026-07-24
-Repository baseline: `484f12e1b4f6751932dc36ab28bd0edac2d8221e` (`main`, synchronized with `origin/main`)
+Repository closure baseline: `705fd72fc22126ef0289aaff53a0f9d69bf21dad` (`main`)
 Production target: `https://welfrise-mvp.vercel.app`
 Release boundary: invitation-only closed pilot; public real-money launch remains unauthorized.
 
@@ -15,6 +15,27 @@ Release boundary: invitation-only closed pilot; public real-money launch remains
 - `UNSAFE` means the scenario is not executed against production because it would alter money, KYC, wallet, invitation, slot, payout, or blockchain state.
 - A test is not a PASS until its evidence is recorded in the functional regression report. Source-contract coverage and live execution are counted separately.
 - Full wallet addresses, transaction hashes, private document URLs, tokens, passwords, and secrets must be redacted from all evidence.
+
+## Controlled QA Closure Phase — 2026-07-24
+
+Migration 006 rehearsal and production verification were attempted only to the point of a non-secret capability check. This workstation has no Supabase CLI, Docker-compatible runtime, PostgreSQL client, database/Supabase credentials, isolated QA project, or authenticated production session. The available production browser redirected `/app` to `/login`.
+
+No database, RLS, RPC, Storage, rollback, concurrency, migration-application, or Treasury case was reclassified. Source-contract checks were not converted into functional passes.
+
+| Result | Count |
+|---|---:|
+| Total | 271 |
+| Passed | 59 |
+| Failed | 1 |
+| Blocked | 211 |
+| Not safely testable | 0 |
+
+The exact owner-operated rehearsal, production preflight, Migration 006 application, post-migration verification, and Treasury-baseline procedure is in `docs/WELFRISE_MIGRATION_006_QA_CLOSURE_RUNBOOK_v1.0.md`.
+
+Current release gate:
+
+- Closed-pilot continuation involving financial, payment, KYC, withdrawal, or admin mutations: **NO-GO until the closure runbook passes and Migration 006 is verified in production.**
+- Public real-money launch: **NO-GO.**
 
 ## A. Repository, build, and deployment quality
 

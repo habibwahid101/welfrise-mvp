@@ -123,10 +123,10 @@ end;
 $$;
 
 -- A payout reference identifies exactly one completed withdrawal, irrespective
--- of letter casing.
+-- of surrounding whitespace or letter casing.
 create unique index if not exists withdrawals_payout_tx_hash_ci_unique
-  on public.withdrawals (lower(payout_tx_hash))
-  where payout_tx_hash is not null;
+  on public.withdrawals (lower(btrim(payout_tx_hash)))
+  where nullif(btrim(payout_tx_hash), '') is not null;
 
 create or replace function public.review_withdrawal_request(
   p_withdrawal_id uuid,

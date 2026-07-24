@@ -244,15 +244,24 @@ Defect counts: **Critical 0, High 7, Medium 8, Low 3**. One High remains open fo
 - **Severity:** Medium
 - **Environment:** Local workstation and production
 - **Preconditions:** Complete transactional/RLS/concurrency verification.
-- **Exact reproduction steps:** Check local capabilities: no Supabase CLI, Docker, PostgreSQL client, service credential, or `.env.local`; production browser has no authenticated session and no password may be assumed.
+- **Exact reproduction steps:** Repeat the controlled closure capability check at `705fd72fc22126ef0289aaff53a0f9d69bf21dad`: inspect command availability, non-secret environment-variable names, Supabase local configuration, and the existing production browser session. No Supabase CLI, Docker, PostgreSQL client, Supabase/database credential, isolated QA project, or authenticated session is available; `/app` redirects to `/login`. No password may be assumed.
 - **Expected result:** Disposable PostgreSQL/Supabase fixtures and existing participant/admin sessions support safe execution without production pollution.
 - **Actual result:** 211 matrix scenarios requiring DB isolation or authenticated context could not be executed.
-- **Evidence:** Tooling/environment inventory and anonymous protected-route redirects.
+- **Evidence:** 2026-07-24 tooling/environment inventory, names-only environment inspection, repository configuration inspection, and anonymous protected-route redirect. No secret value was printed.
 - **Root cause:** No dedicated QA environment or authorized sessions were supplied.
-- **Fix:** Provision a non-production Supabase project seeded with synthetic fixtures, plus documented participant/admin AAL1/AAL2 QA sessions.
+- **Fix:** Provision a non-production Supabase project seeded with synthetic fixtures, plus documented participant/admin AAL1/AAL2 QA sessions, then execute `docs/WELFRISE_MIGRATION_006_QA_CLOSURE_RUNBOOK_v1.0.md`.
 - **Commit SHA:** Not applicable.
 - **Retest result:** BLOCKED.
-- **Remaining risk:** Source contracts cannot prove live RLS, transaction rollback, concurrency, treasury reconciliation, or signed-in production behavior.
+- **Remaining risk:** Source contracts cannot prove live RLS, transaction rollback, concurrency, treasury reconciliation, or signed-in production behavior. Migration 006 remains unapplied and its seven High-severity fixes are not live.
+
+### QA Closure Phase addendum
+
+- The required canonical duplicate-withdrawal-hash preflight is now specified as `lower(btrim(payout_tx_hash))`; it has not been run against production.
+- The pending Migration 006 unique index is aligned to the same trimmed, lower-case canonical form.
+- Migrations 001–006 have not been rehearsed in this phase.
+- The production Treasury baseline has not been queried.
+- No new defect was created and no severity count changed: Critical 0, High 7, Medium 8, Low 3.
+- Closure decision: `NO-GO` for further closed-pilot financial/KYC/admin mutation activity until the runbook passes; public real-money launch remains `NO-GO`.
 
 ## QA-M-008 — Superseded KYC object deletion is not operationally reconciled
 

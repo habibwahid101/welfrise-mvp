@@ -22,6 +22,9 @@ const paymentMigration = fs.readFileSync('supabase/migrations/20260723_002_payme
 const loginPage = fs.readFileSync('src/app/login/page.tsx','utf8')
 const resetPasswordPage = fs.readFileSync('src/app/reset-password/page.tsx','utf8')
 const passwordRecoverySource = fs.readFileSync('src/lib/password-recovery.ts','utf8')
+const passwordRecoveryRequest = fs.readFileSync('src/lib/password-recovery-handler.ts','utf8')
+const passwordRecoveryUpdate = fs.readFileSync('src/app/api/auth/password-recovery/update/route.ts','utf8')
+const authCallback = fs.readFileSync('src/app/auth/callback/route.ts','utf8')
 const fileValidationSource = fs.readFileSync('src/lib/file-validation.ts','utf8')
 const kycRoute = fs.readFileSync('src/app/api/kyc/route.ts','utf8')
 const binanceProofRoute = fs.readFileSync('src/app/api/payments/binance/submit/route.ts','utf8')
@@ -472,22 +475,22 @@ test('payment 22/22: locked financial, referral, FIFO, payout, and championship 
 })
 
 test('password recovery targets the public /reset-password production route', () => {
-  assert.match(loginPage,/supabase\.auth\.resetPasswordForEmail\(recoveryEmail\.trim\(\)\.toLowerCase\(\), \{/)
-  assert.match(loginPage,/redirectTo: `\$\{window\.location\.origin\}\/reset-password`/)
+  assert.match(loginPage,/fetch\('\/api\/auth\/password-recovery\/request'/)
+  assert.match(passwordRecoverySource,/https:\/\/welfrise-mvp\.vercel\.app\/auth\/callback\?next=\/reset-password&flow=recovery/)
   assert.match(resetPasswordPage,/export default function ResetPasswordPage/)
 })
 
 test('password recovery request always uses neutral anti-enumeration copy', () => {
   const neutral = 'If an account exists for this email, a password-reset link has been sent.'
-  assert.match(loginPage,new RegExp(neutral.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')))
-  assert.match(loginPage,/catch \{[\s\S]*response remains deliberately neutral[\s\S]*finally \{[\s\S]*setRecoveryMessage\(RECOVERY_REQUEST_MESSAGE\)/)
-  assert.doesNotMatch(loginPage,/resetPasswordForEmail[\s\S]*error\.message/)
+  assert.match(passwordRecoverySource,new RegExp(neutral.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')))
+  assert.match(passwordRecoveryRequest,/if \(!error\) return json\(\{ ok: true, message: RECOVERY_SUCCESS_MESSAGE \}/)
+  assert.doesNotMatch(loginPage,/resetPasswordForEmail/)
 })
 
-test('valid PASSWORD_RECOVERY session unlocks the reset form', () => {
-  assert.match(resetPasswordPage,/onAuthStateChange\(\(event, session\) => \{/)
-  assert.match(resetPasswordPage,/event !== 'PASSWORD_RECOVERY'/)
-  assert.match(resetPasswordPage,/if \(!session\)[\s\S]*setRecoveryState\('invalid'\)/)
+test('valid PKCE recovery session unlocks the reset form', () => {
+  assert.match(authCallback,/exchangeCodeForSession\(code\)/)
+  assert.match(authCallback,/welfrise_recovery_verified/)
+  assert.match(resetPasswordPage,/fetch\('\/api\/auth\/password-recovery\/session'/)
   assert.match(resetPasswordPage,/setRecoveryState\('ready'\)/)
   assert.match(resetPasswordPage,/Verifying recovery link…/)
 })
@@ -517,8 +520,8 @@ test('password confirmation mismatch is rejected inline before update', async ()
 })
 
 test('successful recovery updates the authenticated user password', () => {
-  assert.match(resetPasswordPage,/await supabase\.auth\.updateUser\(\{ password \}\)/)
-  assert.match(resetPasswordPage,/if \(error\) \{[\s\S]*setFieldError\(INVALID_RECOVERY_LINK_MESSAGE\)[\s\S]*return/)
+  assert.match(resetPasswordPage,/fetch\('\/api\/auth\/password-recovery\/update'/)
+  assert.match(passwordRecoveryUpdate,/supabase\.auth\.updateUser\(\{ password \}\)/)
   assert.match(resetPasswordPage,/setRecoveryState\('success'\)/)
 })
 
@@ -526,12 +529,12 @@ test('recovery credentials and URL fragments are removed from browser history', 
   const recovery = await loadPasswordRecoveryHarness()
   assert.equal(recovery.hasRecoveryLinkParameters('https://welfrise.example/reset-password#access_token=secret&refresh_token=secret&type=recovery'),true)
   assert.match(resetPasswordPage,/window\.history\.replaceState\(null, '', window\.location\.pathname\)/)
-  assert.ok((resetPasswordPage.match(/removeRecoveryCredentialsFromUrl\(\)/g) || []).length >= 4)
+  assert.match(resetPasswordPage,/clearRecoveryUrl\(\)/)
   assert.doesNotMatch(resetPasswordPage,/access_token\}|refresh_token\}|token_hash\}/)
 })
 
 test('successful password recovery signs out locally and returns to login', () => {
-  assert.match(resetPasswordPage,/await supabase\.auth\.signOut\(\{ scope: 'local' \}\)/)
+  assert.match(passwordRecoveryUpdate,/await supabase\.auth\.signOut\(\{ scope: 'local' \}\)/)
   assert.match(resetPasswordPage,/<Link className="primary-link recovery-login-link" href="\/login">Return to sign in<\/Link>/)
   assert.match(resetPasswordPage,/Your password has been updated\. Sign in with your new password\./)
 })

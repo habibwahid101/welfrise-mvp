@@ -26,8 +26,11 @@ test('registration form preserves fields and supports password visibility', asyn
 })
 
 test('prototype redirects to dashboard path', async ({ page }) => {
-  await page.goto('/app/prototype')
-  await expect(page).toHaveURL(/\/app$/)
+  const paths: string[] = []
+  page.on('request',request => paths.push(new URL(request.url()).pathname))
+  await page.goto('https://welfrise-mvp.vercel.app/app/prototype')
+  expect(paths).toContain('/app')
+  await expect(page).toHaveURL(/\/login(?:\?|$)/)
 })
 
 test('unauthenticated production app redirects to login', async ({ page }) => {
